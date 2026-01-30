@@ -1,0 +1,182 @@
+{
+  "Version": 1,
+  "WorkspaceRootPath": "C:\\Users\\hein3\\source\\repos\\LMU_Telemetry\\",
+  "Documents": [
+    {
+      "AbsoluteMoniker": "D:0:0:{F29D38FA-5D00-47E5-8F4A-D4D07439EC5C}|LMU_Telemetry.csproj|c:\\users\\hein3\\source\\repos\\lmu_telemetry\\mainwindow.xaml.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}",
+      "RelativeMoniker": "D:0:0:{F29D38FA-5D00-47E5-8F4A-D4D07439EC5C}|LMU_Telemetry.csproj|solutionrelative:mainwindow.xaml.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}"
+    },
+    {
+      "AbsoluteMoniker": "D:0:0:{F29D38FA-5D00-47E5-8F4A-D4D07439EC5C}|LMU_Telemetry.csproj|c:\\users\\hein3\\source\\repos\\lmu_telemetry\\mainwindow.xaml||{F11ACC28-31D1-4C80-A34B-F4E09D3D753C}",
+      "RelativeMoniker": "D:0:0:{F29D38FA-5D00-47E5-8F4A-D4D07439EC5C}|LMU_Telemetry.csproj|solutionrelative:mainwindow.xaml||{F11ACC28-31D1-4C80-A34B-F4E09D3D753C}"
+    },
+    {
+      "AbsoluteMoniker": "D:0:0:{F29D38FA-5D00-47E5-8F4A-D4D07439EC5C}|LMU_Telemetry.csproj|c:\\users\\hein3\\source\\repos\\lmu_telemetry\\views\\trackview.xaml||{FA3CD31E-987B-443A-9B81-186104E8DAC1}|",
+      "RelativeMoniker": "D:0:0:{F29D38FA-5D00-47E5-8F4A-D4D07439EC5C}|LMU_Telemetry.csproj|solutionrelative:views\\trackview.xaml||{FA3CD31E-987B-443A-9B81-186104E8DAC1}|"
+    },
+    {
+      "AbsoluteMoniker": "D:0:0:{A2FE74E1-B743-11D0-AE1A-00A0C90FFFC3}|\u003CMiscFiles\u003E|C:\\Users\\hein3\\source\\repos\\LMU_Telemetry\\obj\\Debug\\net8.0-windows\\Views\\InputView.g.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}",
+      "RelativeMoniker": "D:0:0:{A2FE74E1-B743-11D0-AE1A-00A0C90FFFC3}|\u003CMiscFiles\u003E|solutionrelative:obj\\Debug\\net8.0-windows\\Views\\InputView.g.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}"
+    },
+    {
+      "AbsoluteMoniker": "D:0:0:{A2FE74E1-B743-11D0-AE1A-00A0C90FFFC3}|\u003CMiscFiles\u003E|C:\\Users\\hein3\\source\\repos\\LMU_Telemetry\\obj\\Debug\\net8.0-windows\\Views\\MainWindow.g.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}",
+      "RelativeMoniker": "D:0:0:{A2FE74E1-B743-11D0-AE1A-00A0C90FFFC3}|\u003CMiscFiles\u003E|solutionrelative:obj\\Debug\\net8.0-windows\\Views\\MainWindow.g.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}"
+    },
+    {
+      "AbsoluteMoniker": "D:0:0:{F29D38FA-5D00-47E5-8F4A-D4D07439EC5C}|LMU_Telemetry.csproj|c:\\users\\hein3\\source\\repos\\lmu_telemetry\\telemetry\\telemetrybuffer.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}",
+      "RelativeMoniker": "D:0:0:{F29D38FA-5D00-47E5-8F4A-D4D07439EC5C}|LMU_Telemetry.csproj|solutionrelative:telemetry\\telemetrybuffer.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}"
+    },
+    {
+      "AbsoluteMoniker": "D:0:0:{F29D38FA-5D00-47E5-8F4A-D4D07439EC5C}|LMU_Telemetry.csproj|c:\\users\\hein3\\source\\repos\\lmu_telemetry\\rendering\\trackrenderer.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}",
+      "RelativeMoniker": "D:0:0:{F29D38FA-5D00-47E5-8F4A-D4D07439EC5C}|LMU_Telemetry.csproj|solutionrelative:rendering\\trackrenderer.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}"
+    },
+    {
+      "AbsoluteMoniker": "D:0:0:{F29D38FA-5D00-47E5-8F4A-D4D07439EC5C}|LMU_Telemetry.csproj|c:\\users\\hein3\\source\\repos\\lmu_telemetry\\lmu_telemetry.csproj||{FA3CD31E-987B-443A-9B81-186104E8DAC1}",
+      "RelativeMoniker": "D:0:0:{F29D38FA-5D00-47E5-8F4A-D4D07439EC5C}|LMU_Telemetry.csproj|solutionrelative:lmu_telemetry.csproj||{FA3CD31E-987B-443A-9B81-186104E8DAC1}"
+    },
+    {
+      "AbsoluteMoniker": "D:0:0:{F29D38FA-5D00-47E5-8F4A-D4D07439EC5C}|LMU_Telemetry.csproj|c:\\users\\hein3\\source\\repos\\lmu_telemetry\\views\\mainwindow.xaml||{F11ACC28-31D1-4C80-A34B-F4E09D3D753C}",
+      "RelativeMoniker": "D:0:0:{F29D38FA-5D00-47E5-8F4A-D4D07439EC5C}|LMU_Telemetry.csproj|solutionrelative:views\\mainwindow.xaml||{F11ACC28-31D1-4C80-A34B-F4E09D3D753C}"
+    },
+    {
+      "AbsoluteMoniker": "D:0:0:{F29D38FA-5D00-47E5-8F4A-D4D07439EC5C}|LMU_Telemetry.csproj|c:\\users\\hein3\\source\\repos\\lmu_telemetry\\views\\inputview.xaml||{F11ACC28-31D1-4C80-A34B-F4E09D3D753C}",
+      "RelativeMoniker": "D:0:0:{F29D38FA-5D00-47E5-8F4A-D4D07439EC5C}|LMU_Telemetry.csproj|solutionrelative:views\\inputview.xaml||{F11ACC28-31D1-4C80-A34B-F4E09D3D753C}"
+    }
+  ],
+  "DocumentGroupContainers": [
+    {
+      "Orientation": 0,
+      "VerticalTabListWidth": 256,
+      "DocumentGroups": [
+        {
+          "DockedWidth": 200,
+          "SelectedChildIndex": 3,
+          "Children": [
+            {
+              "$type": "Bookmark",
+              "Name": "ST:0:0:{40ea2e6b-2121-4bb8-a43e-c83c04b51041}"
+            },
+            {
+              "$type": "Document",
+              "DocumentIndex": 2,
+              "Title": "TrackView.xaml",
+              "DocumentMoniker": "C:\\Users\\hein3\\source\\repos\\LMU_Telemetry\\Views\\TrackView.xaml",
+              "RelativeDocumentMoniker": "Views\\TrackView.xaml",
+              "ToolTip": "C:\\Users\\hein3\\source\\repos\\LMU_Telemetry\\Views\\TrackView.xaml",
+              "RelativeToolTip": "Views\\TrackView.xaml",
+              "ViewState": "AgIAAAAAAAAAAAAAAAAAAAAAAAAfAAAAAAAAAA==",
+              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.003549|",
+              "WhenOpened": "2026-01-27T15:08:00.321Z"
+            },
+            {
+              "$type": "Document",
+              "DocumentIndex": 8,
+              "Title": "MainWindow.xaml",
+              "DocumentMoniker": "C:\\Users\\hein3\\source\\repos\\LMU_Telemetry\\Views\\MainWindow.xaml",
+              "RelativeDocumentMoniker": "Views\\MainWindow.xaml",
+              "ToolTip": "C:\\Users\\hein3\\source\\repos\\LMU_Telemetry\\Views\\MainWindow.xaml",
+              "RelativeToolTip": "Views\\MainWindow.xaml",
+              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.003549|",
+              "WhenOpened": "2026-01-27T15:07:58.383Z"
+            },
+            {
+              "$type": "Document",
+              "DocumentIndex": 0,
+              "Title": "MainWindow.xaml.cs",
+              "DocumentMoniker": "C:\\Users\\hein3\\source\\repos\\LMU_Telemetry\\MainWindow.xaml.cs",
+              "RelativeDocumentMoniker": "MainWindow.xaml.cs",
+              "ToolTip": "C:\\Users\\hein3\\source\\repos\\LMU_Telemetry\\MainWindow.xaml.cs",
+              "RelativeToolTip": "MainWindow.xaml.cs",
+              "ViewState": "AgIAAEYAAAAAAAAAAADwv10AAAAIAAAAAAAAAA==",
+              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000738|",
+              "WhenOpened": "2026-01-27T14:46:49.779Z",
+              "EditorCaption": ""
+            },
+            {
+              "$type": "Document",
+              "DocumentIndex": 3,
+              "Title": "InputView.g.cs",
+              "DocumentMoniker": "C:\\Users\\hein3\\source\\repos\\LMU_Telemetry\\obj\\Debug\\net8.0-windows\\Views\\InputView.g.cs",
+              "RelativeDocumentMoniker": "obj\\Debug\\net8.0-windows\\Views\\InputView.g.cs",
+              "ToolTip": "C:\\Users\\hein3\\source\\repos\\LMU_Telemetry\\obj\\Debug\\net8.0-windows\\Views\\InputView.g.cs",
+              "RelativeToolTip": "obj\\Debug\\net8.0-windows\\Views\\InputView.g.cs",
+              "ViewState": "AgIAAA8AAAAAAAAAAAAvwCgAAAAZAAAAAAAAAA==",
+              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000738|",
+              "WhenOpened": "2026-01-27T15:11:30.909Z"
+            },
+            {
+              "$type": "Document",
+              "DocumentIndex": 9,
+              "Title": "InputView.xaml",
+              "DocumentMoniker": "C:\\Users\\hein3\\source\\repos\\LMU_Telemetry\\Views\\InputView.xaml",
+              "RelativeDocumentMoniker": "Views\\InputView.xaml",
+              "ToolTip": "C:\\Users\\hein3\\source\\repos\\LMU_Telemetry\\Views\\InputView.xaml",
+              "RelativeToolTip": "Views\\InputView.xaml",
+              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.003549|",
+              "WhenOpened": "2026-01-27T15:07:44.277Z"
+            },
+            {
+              "$type": "Document",
+              "DocumentIndex": 7,
+              "Title": "LMU_Telemetry.csproj",
+              "DocumentMoniker": "C:\\Users\\hein3\\source\\repos\\LMU_Telemetry\\LMU_Telemetry.csproj",
+              "RelativeDocumentMoniker": "LMU_Telemetry.csproj",
+              "ToolTip": "C:\\Users\\hein3\\source\\repos\\LMU_Telemetry\\LMU_Telemetry.csproj",
+              "RelativeToolTip": "LMU_Telemetry.csproj",
+              "ViewState": "AgIAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA==",
+              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000758|",
+              "WhenOpened": "2026-01-27T15:07:23.436Z"
+            },
+            {
+              "$type": "Document",
+              "DocumentIndex": 4,
+              "Title": "MainWindow.g.cs",
+              "DocumentMoniker": "C:\\Users\\hein3\\source\\repos\\LMU_Telemetry\\obj\\Debug\\net8.0-windows\\Views\\MainWindow.g.cs",
+              "RelativeDocumentMoniker": "obj\\Debug\\net8.0-windows\\Views\\MainWindow.g.cs",
+              "ToolTip": "C:\\Users\\hein3\\source\\repos\\LMU_Telemetry\\obj\\Debug\\net8.0-windows\\Views\\MainWindow.g.cs",
+              "RelativeToolTip": "obj\\Debug\\net8.0-windows\\Views\\MainWindow.g.cs",
+              "ViewState": "AgIAABgAAAAAAAAAAAAvwCwAAAAVAAAAAAAAAA==",
+              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000738|",
+              "WhenOpened": "2026-01-27T15:11:34.172Z"
+            },
+            {
+              "$type": "Document",
+              "DocumentIndex": 1,
+              "Title": "MainWindow.xaml",
+              "DocumentMoniker": "C:\\Users\\hein3\\source\\repos\\LMU_Telemetry\\MainWindow.xaml",
+              "RelativeDocumentMoniker": "MainWindow.xaml",
+              "ToolTip": "C:\\Users\\hein3\\source\\repos\\LMU_Telemetry\\MainWindow.xaml",
+              "RelativeToolTip": "MainWindow.xaml",
+              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.003549|",
+              "WhenOpened": "2026-01-27T14:46:50.428Z"
+            },
+            {
+              "$type": "Document",
+              "DocumentIndex": 5,
+              "Title": "TelemetryBuffer.cs",
+              "DocumentMoniker": "C:\\Users\\hein3\\source\\repos\\LMU_Telemetry\\Telemetry\\TelemetryBuffer.cs",
+              "RelativeDocumentMoniker": "Telemetry\\TelemetryBuffer.cs",
+              "ToolTip": "C:\\Users\\hein3\\source\\repos\\LMU_Telemetry\\Telemetry\\TelemetryBuffer.cs",
+              "RelativeToolTip": "Telemetry\\TelemetryBuffer.cs",
+              "ViewState": "AgIAAAAAAAAAAAAAAAAAAAUAAAAbAAAAAAAAAA==",
+              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000738|",
+              "WhenOpened": "2026-01-27T15:16:31.221Z"
+            },
+            {
+              "$type": "Document",
+              "DocumentIndex": 6,
+              "Title": "TrackRenderer.cs",
+              "DocumentMoniker": "C:\\Users\\hein3\\source\\repos\\LMU_Telemetry\\Rendering\\TrackRenderer.cs",
+              "RelativeDocumentMoniker": "Rendering\\TrackRenderer.cs",
+              "ToolTip": "C:\\Users\\hein3\\source\\repos\\LMU_Telemetry\\Rendering\\TrackRenderer.cs",
+              "RelativeToolTip": "Rendering\\TrackRenderer.cs",
+              "ViewState": "AgIAADwAAAAAAAAAAAAowFEAAAAAAAAAAAAAAA==",
+              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000738|",
+              "WhenOpened": "2026-01-27T15:21:30.123Z"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

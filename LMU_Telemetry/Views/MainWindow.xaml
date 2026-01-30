@@ -1,0 +1,9 @@
+<!-- Ensure the root element is present -->
+<Window x:Class="YourNamespace.InputView"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="InputView" Height="350" Width="525">
+    <Grid>
+        <!-- Add your UI elements here -->
+    </Grid>
+</Window>

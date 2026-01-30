@@ -1,0 +1,122 @@
+<UserControl x:Class="LMU_Telemetry.Views.TelemetryFileSelector"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             Background="#252526">
+    <Grid Margin="10">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+
+        <!-- Title -->
+        <TextBlock Grid.Row="0" Text="📁 LOAD TELEMETRY RECORDING" 
+                   Foreground="#569CD6" FontSize="16" FontWeight="Bold" 
+                   Margin="0,0,0,10"/>
+
+        <!-- Path info and browse -->
+        <StackPanel Grid.Row="1" Margin="0,0,0,10">
+            <TextBlock x:Name="PathInfoText" Text="Click 'Select Folder' to choose your telemetry directory" 
+                       Foreground="#CCCCCC" FontSize="11" TextWrapping="Wrap" Margin="0,0,0,8"/>
+            <Button x:Name="SelectFolderButton" Content="📂 Select Folder" 
+                    Width="150" Height="35" HorizontalAlignment="Left"
+                    Background="#0E639C" Foreground="White" 
+                    BorderBrush="#1177BB" BorderThickness="1"
+                    FontSize="13" FontWeight="SemiBold"
+                    Cursor="Hand" Click="SelectFolderButton_Click"
+                    ToolTip="Choose the folder containing your .duckdb telemetry files">
+                <Button.Style>
+                    <Style TargetType="Button">
+                        <Style.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter Property="Background" Value="#1177BB"/>
+                            </Trigger>
+                        </Style.Triggers>
+                    </Style>
+                </Button.Style>
+            </Button>
+        </StackPanel>
+
+        <!-- File list -->
+        <Border Grid.Row="2" Background="#1E1E1E" BorderBrush="#3E3E42" 
+                BorderThickness="1" Margin="0,0,0,10">
+            <ScrollViewer VerticalScrollBarVisibility="Auto">
+                <ListBox x:Name="FileListBox" 
+                         Background="Transparent" 
+                         BorderThickness="0"
+                         SelectionChanged="FileListBox_SelectionChanged">
+                    <ListBox.ItemContainerStyle>
+                        <Style TargetType="ListBoxItem">
+                            <Setter Property="Background" Value="Transparent"/>
+                            <Setter Property="Foreground" Value="#CCCCCC"/>
+                            <Setter Property="Padding" Value="8"/>
+                            <Setter Property="Margin" Value="2"/>
+                            <Setter Property="Template">
+                                <Setter.Value>
+                                    <ControlTemplate TargetType="ListBoxItem">
+                                        <Border Background="{TemplateBinding Background}" 
+                                                BorderBrush="#3E3E42" 
+                                                BorderThickness="0,0,0,1"
+                                                Padding="{TemplateBinding Padding}">
+                                            <ContentPresenter/>
+                                        </Border>
+                                    </ControlTemplate>
+                                </Setter.Value>
+                            </Setter>
+                            <Style.Triggers>
+                                <Trigger Property="IsSelected" Value="True">
+                                    <Setter Property="Background" Value="#094771"/>
+                                    <Setter Property="Foreground" Value="White"/>
+                                </Trigger>
+                                <Trigger Property="IsMouseOver" Value="True">
+                                    <Setter Property="Background" Value="#2A2D2E"/>
+                                </Trigger>
+                            </Style.Triggers>
+                        </Style>
+                    </ListBox.ItemContainerStyle>
+                    <ListBox.ItemTemplate>
+                        <DataTemplate>
+                            <StackPanel>
+                                <TextBlock Text="{Binding DisplayName, Mode=OneWay}" 
+                                           FontWeight="SemiBold" 
+                                           FontSize="12"
+                                           Margin="0,0,0,3"/>
+                                <TextBlock FontSize="10" Foreground="#888888">
+                                    <Run Text="Duration: "/>
+                                    <Run Text="{Binding Duration, StringFormat='{}{0:mm\\:ss}', Mode=OneWay}"/>
+                                    <Run Text="  •  Size: "/>
+                                    <Run Text="{Binding FileSizeFormatted, Mode=OneWay}"/>
+                                </TextBlock>
+                            </StackPanel>
+                        </DataTemplate>
+                    </ListBox.ItemTemplate>
+                </ListBox>
+            </ScrollViewer>
+        </Border>
+
+        <!-- Action buttons -->
+        <StackPanel Grid.Row="3" Orientation="Horizontal" HorizontalAlignment="Right">
+            <Button x:Name="LoadButton" Content="📥 Load Recording" 
+                    Width="140" Height="30"
+                    Background="#0E639C" Foreground="White" 
+                    BorderBrush="#1177BB" BorderThickness="1"
+                    Cursor="Hand" Click="LoadButton_Click"
+                    IsEnabled="False">
+                <Button.Style>
+                    <Style TargetType="Button">
+                        <Style.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter Property="Background" Value="#1177BB"/>
+                            </Trigger>
+                            <Trigger Property="IsEnabled" Value="False">
+                                <Setter Property="Background" Value="#3E3E42"/>
+                                <Setter Property="Foreground" Value="#666666"/>
+                            </Trigger>
+                        </Style.Triggers>
+                    </Style>
+                </Button.Style>
+            </Button>
+        </StackPanel>
+    </Grid>
+</UserControl>
