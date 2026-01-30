@@ -35,6 +35,17 @@ public partial class MainWindow : Window
     private int _playbackSpeedMultiplier = 1; // 1x, 2x, or 4x speed
     private System.Windows.Threading.DispatcherTimer? _replayTimer;
     private List<TelemetryFrame>? _cachedTransformedFrames = null;
+    private double _zoomFactor = 1.0;
+    private const double ZoomMin = 0.5;
+    private const double ZoomMax = 4.0;
+    private const double PanSensitivity = 1.6;
+    private double _zoomAnchorX = 0.5; // normalized anchor (0-1)
+    private double _zoomAnchorY = 0.5;
+    private bool _showTrackMap = true;
+    private bool _isPanning = false;
+    private Point _lastPanPoint = new Point(0, 0);
+    private double _panOffsetX = 0;
+    private double _panOffsetY = 0;
     private int _lastLapNumber = 0; // Track lap changes for resetting driven path
     private System.Windows.Shapes.Polygon? _carArrow = null; // Track current car arrow to prevent ghosting
     private List<LapTimingInfo>? _timingCache = null;
@@ -45,6 +56,7 @@ public partial class MainWindow : Window
     private string? _currentTrackName = null;
     private string? _currentReplayFilePath = null; // Store the loaded replay file path
     private readonly string _logFilePath = System.IO.Path.Combine(System.IO.Path.GetTempPath(), "LMU_TrackMap_Debug.txt");
+    private bool _extendedChannelsLogged = false;
 
     public MainWindow()
     {
@@ -119,6 +131,7 @@ public partial class MainWindow : Window
             TrackCanvas.SizeChanged += (s, args) =>
             {
                 _cachedTransformedFrames = null;
+                UpdateCanvasZoomTransform();
                 if (_isReplayMode && _viewModel.Buffer.HasData)
                 {
                     UpdateDisplay();
@@ -394,31 +407,93 @@ public partial class MainWindow : Window
     {
         if (TrackCanvas != null && _viewModel.Buffer.HasData)
         {
+            if (e.ChangedButton == MouseButton.Right && _zoomFactor > 1.0)
+            {
+                _isPanning = true;
+                _lastPanPoint = e.GetPosition(TrackCanvas);
+                TrackCanvas.CaptureMouse();
+                e.Handled = true;
+                return;
+            }
+
             _isDragging = true;
             _isPaused = true;
             _viewModel.IsLiveMode = false;
             TrackCanvas.CaptureMouse();
             UpdatePlayPauseButton();
-            
-            DragPlayerToPosition(e.GetPosition(TrackCanvas));
+
+            DragPlayerToPosition(GetLogicalCanvasPosition(e));
         }
     }
 
     private void TrackCanvas_MouseMove(object sender, MouseEventArgs e)
     {
+        if (_isPanning && TrackCanvas != null && _zoomFactor > 1.0)
+        {
+            var current = e.GetPosition(TrackCanvas);
+            var dx = current.X - _lastPanPoint.X;
+            var dy = current.Y - _lastPanPoint.Y;
+            _lastPanPoint = current;
+
+            _panOffsetX += dx * PanSensitivity;
+            _panOffsetY += dy * PanSensitivity;
+            ClampPanOffsets();
+            UpdateCanvasZoomTransform();
+            e.Handled = true;
+            return;
+        }
+
         if (_isDragging && TrackCanvas != null && _viewModel.Buffer.HasData)
         {
-            DragPlayerToPosition(e.GetPosition(TrackCanvas));
+            DragPlayerToPosition(GetLogicalCanvasPosition(e));
         }
     }
 
     private void TrackCanvas_MouseUp(object sender, MouseButtonEventArgs e)
     {
+        if (_isPanning)
+        {
+            _isPanning = false;
+            TrackCanvas?.ReleaseMouseCapture();
+            e.Handled = true;
+        }
+
         if (_isDragging)
         {
             _isDragging = false;
             TrackCanvas?.ReleaseMouseCapture();
         }
+    }
+
+    private void TrackCanvas_MouseWheel(object sender, MouseWheelEventArgs e)
+    {
+        if (!_viewModel.Buffer.HasData) return;
+
+        if (TrackCanvas != null && TrackCanvas.ActualWidth > 0 && TrackCanvas.ActualHeight > 0)
+        {
+            var pos = e.GetPosition(TrackCanvas);
+            _zoomAnchorX = Math.Clamp(pos.X / TrackCanvas.ActualWidth, 0.0, 1.0);
+            _zoomAnchorY = Math.Clamp(pos.Y / TrackCanvas.ActualHeight, 0.0, 1.0);
+        }
+
+        var delta = e.Delta > 0 ? 0.1 : -0.1;
+        var newZoom = Math.Clamp(_zoomFactor + delta, ZoomMin, ZoomMax);
+
+        if (Math.Abs(newZoom - _zoomFactor) < 0.0001) return;
+
+        _zoomFactor = newZoom;
+        ClampPanOffsets();
+        UpdateCanvasZoomTransform();
+        _cachedTransformedFrames = null; // Recalculate positions (but render transform handles zoom)
+        UpdateDisplay();
+    }
+
+    private void TrackMapToggle_Checked(object sender, RoutedEventArgs e)
+    {
+        _showTrackMap = TrackMapToggle?.IsChecked == true;
+        ClearCanvas();
+        _cachedTransformedFrames = null;
+        UpdateDisplay();
     }
 
     private void DragPlayerToPosition(Point canvasPosition)
@@ -472,6 +547,28 @@ public partial class MainWindow : Window
         }
     }
 
+    private Point GetLogicalCanvasPosition(MouseEventArgs e)
+    {
+        if (TrackCanvas == null) return new Point(0, 0);
+
+        var pos = e.GetPosition(TrackCanvas);
+        try
+        {
+            var transform = TrackCanvas.RenderTransform.Value;
+            if (transform.HasInverse)
+            {
+                transform.Invert();
+                return transform.Transform(pos);
+            }
+        }
+        catch
+        {
+            // Fallback to raw position if inversion fails
+        }
+
+        return pos;
+    }
+
     private void UpdateDisplay()
     {
         try
@@ -481,7 +578,6 @@ public partial class MainWindow : Window
                 // In replay mode, cache transformed frames for performance
                 if (_isReplayMode)
                 {
-                    // Only transform once when frames are loaded or canvas size changes
                     if (_cachedTransformedFrames == null)
                     {
                         _cachedTransformedFrames = TransformFramesToCanvas(_viewModel.Buffer.Frames);
@@ -491,18 +587,7 @@ public partial class MainWindow : Window
                         {
                             _lastLapNumber = _viewModel.CurrentFrame.CurrentLap - 1; // Make it different so first draw triggers
                         }
-                        
-                        ClearCanvas();
-                        
-                        // Schedule centerline drawing after layout completes
-                        Dispatcher.BeginInvoke(new Action(() => {
-                            System.Diagnostics.Debug.WriteLine($"Dispatcher: Canvas size now: {TrackCanvas.ActualWidth}x{TrackCanvas.ActualHeight}");
-                            DrawCenterline();
-                            TrackCanvas.InvalidateVisual();
-                        }), System.Windows.Threading.DispatcherPriority.Render);
                     }
-                    
-                    // Only update car position and lap path
                     if (_viewModel.CurrentFrame != null && _cachedTransformedFrames != null)
                     {
                         var currentLap = _viewModel.CurrentFrame.CurrentLap;
@@ -633,24 +718,29 @@ public partial class MainWindow : Window
             Log($"World bounds: X=[{minX:F1}, {maxX:F1}], Y=[{minY:F1}, {maxY:F1}]");
             Log($"Scale: {scale:F4}, Offset: ({offsetX:F1}, {offsetY:F1})");
             
-            return worldPoints.Select(p => new TelemetryFrame
-            {
-                Time = p.Frame.Time,
-                PosX = (float)(offsetX + (p.WorldX - minX) * scale),
-                PosY = (float)(offsetY + (maxY - p.WorldY) * scale), // Flip Y for screen coordinates
-                Speed = p.Frame.Speed,
-                Throttle = p.Frame.Throttle,
-                Brake = p.Frame.Brake,
-                Steering = p.Frame.Steering,
-                Gear = p.Frame.Gear,
-                Rpm = p.Frame.Rpm,
-                CurrentLap = p.Frame.CurrentLap,
-                LapDistance = p.Frame.LapDistance,
-                LapTime = p.Frame.LapTime,
-                Sector = p.Frame.Sector
+            return worldPoints.Select(p => {
+                var rawX = offsetX + (p.WorldX - minX) * scale;
+                var rawY = offsetY + (maxY - p.WorldY) * scale; // Flip Y for screen coordinates
+                var zoomed = ApplyZoom(rawX, rawY, canvasWidth, canvasHeight);
+
+                return new TelemetryFrame
+                {
+                    Time = p.Frame.Time,
+                    PosX = (float)zoomed.X,
+                    PosY = (float)zoomed.Y,
+                    Speed = p.Frame.Speed,
+                    Throttle = p.Frame.Throttle,
+                    Brake = p.Frame.Brake,
+                    Steering = p.Frame.Steering,
+                    Gear = p.Frame.Gear,
+                    Rpm = p.Frame.Rpm,
+                    CurrentLap = p.Frame.CurrentLap,
+                    LapDistance = p.Frame.LapDistance,
+                    LapTime = p.Frame.LapTime,
+                    Sector = p.Frame.Sector
+                };
             }).ToList();
         }
-        
         // Fallback: Auto-fit (no track map or centerline built yet)
         Log($"No track map - using auto-fit transform");
 
@@ -668,7 +758,7 @@ public partial class MainWindow : Window
                 Frame: f
             );
         }).ToList();
-        
+
         var fallbackMinX = rotatedFrames.Min(f => f.PosX);
         var fallbackMaxX = rotatedFrames.Max(f => f.PosX);
         var fallbackMinY = rotatedFrames.Min(f => f.PosY);
@@ -684,22 +774,70 @@ public partial class MainWindow : Window
         var fallbackOffsetX = (canvasWidth - (fallbackMaxX - fallbackMinX) * fallbackScale) / 2;
         var fallbackOffsetY = (canvasHeight - (fallbackMaxY - fallbackMinY) * fallbackScale) / 2;
 
-        return rotatedFrames.Select(rf => new TelemetryFrame
-        {
-            Time = rf.Frame.Time,
-            PosX = (float)(fallbackOffsetX + (rf.PosX - fallbackMinX) * fallbackScale),
-            PosY = (float)(fallbackOffsetY + (fallbackMaxY - rf.PosY) * fallbackScale),
-            Speed = rf.Frame.Speed,
-            Throttle = rf.Frame.Throttle,
-            Brake = rf.Frame.Brake,
-            Steering = rf.Frame.Steering,
-            Gear = rf.Frame.Gear,
-            Rpm = rf.Frame.Rpm,
-            CurrentLap = rf.Frame.CurrentLap,
-            LapDistance = rf.Frame.LapDistance,
-            LapTime = rf.Frame.LapTime,
-            Sector = rf.Frame.Sector
+        return rotatedFrames.Select(rf => {
+            var rawX = fallbackOffsetX + (rf.PosX - fallbackMinX) * fallbackScale;
+            var rawY = fallbackOffsetY + (fallbackMaxY - rf.PosY) * fallbackScale;
+            var zoomed = ApplyZoom(rawX, rawY, canvasWidth, canvasHeight);
+
+            return new TelemetryFrame
+            {
+                Time = rf.Frame.Time,
+                PosX = (float)zoomed.X,
+                PosY = (float)zoomed.Y,
+                Speed = rf.Frame.Speed,
+                Throttle = rf.Frame.Throttle,
+                Brake = rf.Frame.Brake,
+                Steering = rf.Frame.Steering,
+                Gear = rf.Frame.Gear,
+                Rpm = rf.Frame.Rpm,
+                CurrentLap = rf.Frame.CurrentLap,
+                LapDistance = rf.Frame.LapDistance,
+                LapTime = rf.Frame.LapTime,
+                Sector = rf.Frame.Sector
+            };
         }).ToList();
+    }
+
+    private Point ApplyZoom(double x, double y, double canvasWidth, double canvasHeight)
+    {
+        // Zoom now handled by TrackCanvas.RenderTransform so coordinates stay in data space here
+        return new Point(x, y);
+    }
+
+    private void ClampPanOffsets()
+    {
+        if (TrackCanvas == null) return;
+        if (_zoomFactor <= 1.0)
+        {
+            _panOffsetX = 0;
+            _panOffsetY = 0;
+            return;
+        }
+
+        // Limit panning so content cannot move fully off-screen
+        double maxOffsetX = (TrackCanvas.ActualWidth * (_zoomFactor - 1.0)) / 2.0;
+        double maxOffsetY = (TrackCanvas.ActualHeight * (_zoomFactor - 1.0)) / 2.0;
+
+        _panOffsetX = Math.Clamp(_panOffsetX, -maxOffsetX, maxOffsetX);
+        _panOffsetY = Math.Clamp(_panOffsetY, -maxOffsetY, maxOffsetY);
+    }
+
+    private void UpdateCanvasZoomTransform()
+    {
+        if (TrackCanvas == null || TrackCanvas.ActualWidth <= 0 || TrackCanvas.ActualHeight <= 0)
+        {
+            return;
+        }
+
+        var anchorX = TrackCanvas.ActualWidth * _zoomAnchorX;
+        var anchorY = TrackCanvas.ActualHeight * _zoomAnchorY;
+
+        var matrix = Matrix.Identity;
+        matrix.Translate(-anchorX, -anchorY);
+        matrix.Scale(_zoomFactor, _zoomFactor);
+        matrix.Translate(anchorX + _panOffsetX, anchorY + _panOffsetY);
+
+        TrackCanvas.RenderTransform = new MatrixTransform(matrix);
     }
 
     private TelemetryFrame TransformFrameToCanvas(TelemetryFrame frame)
@@ -729,12 +867,13 @@ public partial class MainWindow : Window
 
         var canvasX = offsetX + (frame.PosX - minX) * scale;
         var canvasY = offsetY + (maxY - frame.PosY) * scale;
+        var zoomed = ApplyZoom(canvasX, canvasY, canvasWidth, canvasHeight);
 
         return new TelemetryFrame
         {
             Time = frame.Time,
-            PosX = (float)canvasX,
-            PosY = (float)canvasY,
+            PosX = (float)zoomed.X,
+            PosY = (float)zoomed.Y,
             Speed = frame.Speed,
             Throttle = frame.Throttle,
             Brake = frame.Brake,
@@ -793,6 +932,9 @@ public partial class MainWindow : Window
                     _inputRenderer.DrawInputGraphs(InputGraphCanvas, _viewModel.Buffer.Frames, 
                                                     _viewModel.Buffer.CurrentIndex);
                 }
+
+                // Push data into the new Detailed Analysis view (read-only, derived locally)
+                DetailedAnalysisViewControl?.PushFrame(frame, _viewModel.Buffer.Frames);
             }
             else
             {
@@ -1287,6 +1429,13 @@ public partial class MainWindow : Window
                 return;
             }
 
+            // Log available extended channels once for diagnostics
+            if (!_extendedChannelsLogged)
+            {
+                LogAvailableExtendedChannels(frames);
+                _extendedChannelsLogged = true;
+            }
+
             System.Diagnostics.Debug.WriteLine("Clearing buffer and adding frames");
 
             // CRITICAL: Disconnect event handler from mock service to prevent contamination
@@ -1372,6 +1521,15 @@ public partial class MainWindow : Window
             
             // Try to load pre-generated track map
             bool hasTrackMap = LoadTrackMapIfExists();
+
+            // If a map was loaded after the first draw, force a redraw so it appears immediately
+            if (hasTrackMap && _showTrackMap)
+            {
+                ClearCanvas();
+                _cachedTransformedFrames = null;
+                DrawCenterline();
+                UpdateDisplay();
+            }
             
             // Show message if no track map exists (commented out to avoid interruption)
             // if (!hasTrackMap)
@@ -1423,6 +1581,7 @@ public partial class MainWindow : Window
     private void DrawCenterline()
     {
         if (TrackCanvas == null) return;
+        if (!_showTrackMap) return;
         
         var canvasWidth = TrackCanvas.ActualWidth;
         var canvasHeight = TrackCanvas.ActualHeight;
@@ -1475,28 +1634,26 @@ public partial class MainWindow : Window
             double offsetX = (canvasWidth - rangeX * scale) / 2;
             double offsetY = (canvasHeight - rangeY * scale) / 2;
             
-            // Apply same canvas transformation as telemetry
-            var points = new PointCollection(
-                rotatedTrack.Select(p => new Point(
-                    offsetX + (p.X - minX) * scale,
-                    offsetY + (maxY - p.Y) * scale
-                ))
-            );
+            // Apply same canvas transformation as telemetry, then zoom around anchor
+            var basePoints = rotatedTrack.Select(p => new Point(
+                offsetX + (p.X - minX) * scale,
+                offsetY + (maxY - p.Y) * scale
+            )).ToList();
 
             // Draw black border
             var borderPolyline = new Polyline
             {
                 Stroke = System.Windows.Media.Brushes.Black,
-                StrokeThickness = 6,
-                Points = points
+                StrokeThickness = 6.615, // +10.25% total (another 5% bump)
+                Points = new PointCollection(basePoints)
             };
 
             // Draw white track map
             var trackPolyline = new Polyline
             {
                 Stroke = System.Windows.Media.Brushes.White,
-                StrokeThickness = 4,
-                Points = points
+                StrokeThickness = 4.41, // +10.25% total (another 5% bump)
+                Points = new PointCollection(basePoints)
             };
             
             // Insert at bottom so telemetry draws on top
@@ -1540,16 +1697,16 @@ public partial class MainWindow : Window
         double clOffsetY = (canvasHeight - clRangeY * clScale) / 2;
         
         // Draw centerline as polyline
+        var clBasePoints = centerlinePoints.Select(p => new Point(
+            clOffsetX + (p.X - clMinX) * clScale,
+            clOffsetY + (clMaxY - p.Y) * clScale
+        )).ToList();
+
         var clPolyline = new Polyline
         {
             Stroke = new SolidColorBrush(Color.FromArgb(80, 255, 255, 255)), // Semi-transparent white
             StrokeThickness = 2,
-            Points = new PointCollection(
-                centerlinePoints.Select(p => new Point(
-                    clOffsetX + (p.X - clMinX) * clScale,
-                    clOffsetY + (clMaxY - p.Y) * clScale
-                ))
-            )
+            Points = new PointCollection(clBasePoints)
         };
         
         TrackCanvas.Children.Insert(0, clPolyline); // Insert at bottom so telemetry draws on top
@@ -2046,6 +2203,41 @@ public partial class MainWindow : Window
                 // Final attempt failed or non-IO error, give up
                 return;
             }
+        }
+    }
+
+    private void LogAvailableExtendedChannels(IEnumerable<TelemetryFrame> frames)
+    {
+        try
+        {
+            var keys = frames
+                .SelectMany(f => f.ExtendedData?.Keys ?? Enumerable.Empty<string>())
+                .GroupBy(k => k)
+                .OrderByDescending(g => g.Count())
+                .ThenBy(g => g.Key)
+                .ToList();
+
+            var lines = new List<string>
+            {
+                $"=== ExtendedData channels ({DateTime.Now:yyyy-MM-dd HH:mm:ss}) ===",
+                $"Frames inspected: {frames.Count()}"
+            };
+
+            foreach (var g in keys)
+            {
+                lines.Add($"{g.Key} : {g.Count()} frames");
+            }
+
+            if (keys.Count == 0)
+            {
+                lines.Add("(no ExtendedData entries found)");
+            }
+
+            System.IO.File.AppendAllLines(_logFilePath, lines);
+        }
+        catch (Exception ex)
+        {
+            System.Diagnostics.Debug.WriteLine($"Failed to log extended channels: {ex.Message}");
         }
     }
     

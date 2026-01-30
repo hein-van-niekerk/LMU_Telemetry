@@ -74,7 +74,7 @@ namespace LMU_Telemetry.Rendering
                     X2 = currentFrame.PosX,
                     Y2 = currentFrame.PosY,
                     Stroke = GetInputColor(currentFrame.Throttle, currentFrame.Brake),
-                    StrokeThickness = 4
+                    StrokeThickness = 3.8 // 5% thinner than previous 4px
                 };
                 canvas.Children.Add(line);
             }
@@ -121,7 +121,7 @@ namespace LMU_Telemetry.Rendering
                     X2 = currentFrame.PosX,
                     Y2 = currentFrame.PosY,
                     Stroke = GetInputColor(currentFrame.Throttle, currentFrame.Brake),
-                    StrokeThickness = 1.5 // Thinner line to see track map underneath
+                    StrokeThickness = 1.425 // 5% thinner than previous 1.5px to match driven path ratio
                 };
                 canvas.Children.Add(line);
 
@@ -140,7 +140,7 @@ namespace LMU_Telemetry.Rendering
                     X2 = endFrame.PosX,
                     Y2 = endFrame.PosY,
                     Stroke = GetInputColor(endFrame.Throttle, endFrame.Brake),
-                    StrokeThickness = 1.5
+                    StrokeThickness = 1.425
                 };
                 canvas.Children.Add(finalLine);
             }
@@ -160,7 +160,7 @@ namespace LMU_Telemetry.Rendering
                     X2 = startFrame.PosX,
                     Y2 = startFrame.PosY,
                     Stroke = GetInputColor(lastFrame.Throttle, lastFrame.Brake),
-                    StrokeThickness = 1.5
+                    StrokeThickness = 1.425
                 };
                 canvas.Children.Add(closeLine);
             }
@@ -373,25 +373,31 @@ namespace LMU_Telemetry.Rendering
         
         private Brush GetInputColor(float throttle, float brake)
         {
-            // Red when braking (brake > 10%), green when on throttle (throttle > 10%)
-            // Gradient between them for mixed inputs
+            // Priority: braking overrides throttle coloring
             if (brake > 0.1f)
             {
-                // Braking - red with intensity based on brake pressure
-                var intensity = (byte)Math.Clamp(155 + (brake * 100), 155, 255);
-                return new SolidColorBrush(Color.FromRgb(intensity, 0, 0));
+                if (brake >= 0.5f)
+                {
+                    // Dark red for heavy braking (50-100%)
+                    return new SolidColorBrush(Color.FromRgb(150, 0, 0));
+                }
+                // Lighter red for mild braking (<50%)
+                return new SolidColorBrush(Color.FromRgb(210, 60, 40));
             }
-            else if (throttle > 0.1f)
+
+            if (throttle > 0.1f)
             {
-                // Throttle - green with intensity based on throttle position
-                var intensity = (byte)Math.Clamp(155 + (throttle * 100), 155, 255);
-                return new SolidColorBrush(Color.FromRgb(0, intensity, 0));
+                if (throttle >= 0.99f)
+                {
+                    // Lighter green at full throttle
+                    return new SolidColorBrush(Color.FromRgb(0, 220, 140));
+                }
+                // Darker green when on throttle but not 100%
+                return new SolidColorBrush(Color.FromRgb(0, 150, 70));
             }
-            else
-            {
-                // Coasting - gray
-                return new SolidColorBrush(Color.FromRgb(150, 150, 150));
-            }
+
+            // Coasting
+            return new SolidColorBrush(Color.FromRgb(80, 80, 80));
         }
     }
 }

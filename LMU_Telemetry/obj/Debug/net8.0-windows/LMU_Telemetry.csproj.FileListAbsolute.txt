@@ -98,3 +98,6 @@ C:\Users\User\Downloads\LMU_Telemetry\LMU_Telemetry\obj\Debug\net8.0-windows\Gen
 C:\Users\User\Downloads\LMU_Telemetry\LMU_Telemetry\obj\Debug\net8.0-windows\LMU_Telemetry_MarkupCompile.lref
 C:\Users\User\Downloads\LMU_Telemetry\LMU_Telemetry\obj\Debug\net8.0-windows\Views\DetailedDataView.baml
 C:\Users\User\Downloads\LMU_Telemetry\LMU_Telemetry\obj\Debug\net8.0-windows\Views\DetailedDataView.g.cs
+C:\Users\User\Downloads\LMU_Telemetry\LMU_Telemetry\obj\Debug\net8.0-windows\Views\DetailedAnalysisView.baml
+C:\Users\User\Downloads\LMU_Telemetry\LMU_Telemetry\obj\Debug\net8.0-windows\Views\DetailedAnalysisView.g.cs
+C:\Users\User\Downloads\LMU_Telemetry\LMU_Telemetry\obj\Debug\net8.0-windows\LMU_Telemetry.sourcelink.json

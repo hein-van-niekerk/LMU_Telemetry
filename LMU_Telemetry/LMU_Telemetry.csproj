@@ -28,6 +28,7 @@
     </None>
   </ItemGroup>
 
+
   <Target Name="CopyDuckDBNative" AfterTargets="Build">
     <Copy SourceFiles="$(OutDir)runtimes\win-x64\native\duckdb.dll" DestinationFolder="$(OutDir)" SkipUnchangedFiles="true" Condition="Exists('$(OutDir)runtimes\win-x64\native\duckdb.dll')" />
   </Target>
