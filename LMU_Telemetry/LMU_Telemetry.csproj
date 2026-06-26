@@ -23,6 +23,10 @@
   </ItemGroup>
 
   <ItemGroup>
+    <Resource Include="Resources\wheel_silhouette.png" />
+  </ItemGroup>
+
+  <ItemGroup>
     <None Update="**\*.dll">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </None>

@@ -25,7 +25,7 @@ public partial class MainWindow : Window
     private readonly InputRenderer _inputRenderer;
     private readonly MainViewModel _viewModel;
     private readonly DuckDBTelemetryReader _duckDbReader;
-    private bool _useMockData = false; // Changed to false - use real telemetry data
+    private bool _useMockData = false;
     private bool _isUpdating = false;
     private DateTime _lastRenderTime = DateTime.MinValue;
     private bool _isDragging = false;
@@ -58,6 +58,34 @@ public partial class MainWindow : Window
     private readonly string _logFilePath = System.IO.Path.Combine(System.IO.Path.GetTempPath(), "LMU_TrackMap_Debug.txt");
     private bool _extendedChannelsLogged = false;
 
+    // Cached canvas-space bounds for TransformFrameToCanvas (invalidated when frame count changes)
+    private int _boundsCacheFrameCount = -1;
+    private float _boundsMinX, _boundsMaxX, _boundsMinY, _boundsMaxY;
+
+    // Cached best/last lap times computed from buffer frames (DuckDB replay doesn't store them on frames)
+    private int _lapTimeCacheFrameCount = -1;
+    private float _cachedBestLapTime = 0;
+    private float _cachedLastLapTime = 0;
+
+    // Side panel cached WPF controls — built once, values updated each frame.
+    // Eliminates ~35 object allocations per render frame.
+    private bool _sidePanelBuilt = false;
+    private TextBlock? _sideSessionText;
+    private TextBlock? _sideGearText;
+    private ColumnDefinition? _sideSpeedFilled;
+    private ColumnDefinition? _sideSpeedEmpty;
+    private TextBlock? _sideSpeedLabel;
+    private ColumnDefinition? _sideThrottleFilled;
+    private ColumnDefinition? _sideThrottleEmpty;
+    private TextBlock? _sideThrottleLabel;
+    private ColumnDefinition? _sideBrakeFilled;
+    private ColumnDefinition? _sideBrakeEmpty;
+    private TextBlock? _sideBrakeLabel;
+    private TextBlock? _sideSteeringText;
+    private TextBlock? _sidePosText;
+    private ContentControl? _sideTimingHost;
+    private TelemetryDetailsWindow? _detailWindow;
+
     public MainWindow()
     {
         _trackRenderer = new TrackRenderer();
@@ -78,24 +106,6 @@ public partial class MainWindow : Window
         DataContext = _viewModel;
 
         InitializeComponent();
-
-        // Initialize DetailedDataView with ViewModel
-        if (DetailedDataView != null)
-        {
-            var detailedViewModel = new DetailedDataViewModel();
-            if (DetailedDataView.FindName("ChannelsPanel") is StackPanel channelsPanel)
-            {
-                detailedViewModel.BuildChannelsPanel(channelsPanel);
-            }
-            if (DetailedDataView.FindName("EventsPanel") is StackPanel eventsPanel)
-            {
-                detailedViewModel.BuildEventsPanel(eventsPanel);
-            }
-            if (DetailedDataView.FindName("SummaryPanel") is StackPanel summaryPanel)
-            {
-                detailedViewModel.BuildSummaryPanel(summaryPanel);
-            }
-        }
 
         if (_useMockData)
         {
@@ -130,7 +140,7 @@ public partial class MainWindow : Window
         {
             TrackCanvas.SizeChanged += (s, args) =>
             {
-                _cachedTransformedFrames = null;
+                _cachedTransformedFrames = null; _boundsCacheFrameCount = -1;
                 UpdateCanvasZoomTransform();
                 if (_isReplayMode && _viewModel.Buffer.HasData)
                 {
@@ -139,21 +149,28 @@ public partial class MainWindow : Window
             };
         }
         
-        if (_useMockData && _telemetryService is MockTelemetryService mock)
-        {
-            mock.Start();
-            _isPaused = true;
-            _viewModel.IsLiveMode = false;
-            UpdatePlayPauseButton();
-        }
+        // Real service starts polling for rF2 shared memory — no frames until connected
+        if (_telemetryService is TelemetryService realSvc)
+            realSvc.Start();
     }
 
     private void MainWindow_Closed(object? sender, EventArgs e)
     {
+        _detailWindow?.ForceClose();
         if (_telemetryService is IDisposable disposable)
         {
             disposable.Dispose();
         }
+    }
+
+    private void OpenDetailWindowButton_Click(object sender, RoutedEventArgs e)
+    {
+        if (_detailWindow == null)
+        {
+            _detailWindow = new TelemetryDetailsWindow { Owner = this };
+        }
+        _detailWindow.Show();
+        _detailWindow.Activate();
     }
 
     private void PlayPauseButton_Click(object sender, RoutedEventArgs e)
@@ -339,14 +356,16 @@ public partial class MainWindow : Window
     {
         if (_isPaused)
         {
-            PlayPauseIcon.Data = Geometry.Parse("M8,5 L8,35 L28,20 Z");
-            StatusText.Text = "Paused";
+            PlayPauseIcon.Data = Geometry.Parse("M1,0 L1,10 L9,5 Z");
+            PlayPauseIcon.Fill = new SolidColorBrush(Color.FromRgb(0x4A, 0xC2, 0x6E)); // green play
+            StatusText.Text = "PAUSED";
             StatusText.Foreground = new SolidColorBrush(Color.FromRgb(255, 165, 0));
         }
         else
         {
-            PlayPauseIcon.Data = Geometry.Parse("M8,5 L13,5 L13,35 L8,35 Z M17,5 L22,5 L22,35 L17,35 Z");
-            StatusText.Text = "Playing";
+            PlayPauseIcon.Data = Geometry.Parse("M1,0 L3.2,0 L3.2,10 L1,10 Z M5.8,0 L8,0 L8,10 L5.8,10 Z");
+            PlayPauseIcon.Fill = new SolidColorBrush(Color.FromRgb(0x88, 0x88, 0x88)); // grey pause
+            StatusText.Text = "PLAYING";
             StatusText.Foreground = new SolidColorBrush(Colors.LimeGreen);
         }
     }
@@ -355,7 +374,7 @@ public partial class MainWindow : Window
     {
         if (_viewModel.FrameCount % 60 == 0 || _viewModel.FrameCount < 10)
         {
-            FrameCountText.Text = $"Frames: {_viewModel.FrameCount}";
+            FrameCountText.Text = $"● REC  {_viewModel.FrameCount:N0} frames";
         }
     }
 
@@ -392,6 +411,15 @@ public partial class MainWindow : Window
         {
             _viewModel.ConnectionStatus = status;
             StatusText.Text = status;
+
+            bool connected = status.Contains("Connected", StringComparison.OrdinalIgnoreCase)
+                          && !status.Contains("lost", StringComparison.OrdinalIgnoreCase)
+                          && !status.Contains("fail", StringComparison.OrdinalIgnoreCase);
+            var dotColor = connected
+                ? System.Windows.Media.Color.FromRgb(78, 201, 78)
+                : System.Windows.Media.Color.FromRgb(204, 51, 51);
+            ConnectionDotBrush.Color = dotColor;
+            StatusText.Foreground = new System.Windows.Media.SolidColorBrush(dotColor);
         });
     }
 
@@ -484,7 +512,7 @@ public partial class MainWindow : Window
         _zoomFactor = newZoom;
         ClampPanOffsets();
         UpdateCanvasZoomTransform();
-        _cachedTransformedFrames = null; // Recalculate positions (but render transform handles zoom)
+        _cachedTransformedFrames = null; _boundsCacheFrameCount = -1; _lapTimeCacheFrameCount = -1; // Recalculate positions (but render transform handles zoom)
         UpdateDisplay();
     }
 
@@ -492,7 +520,7 @@ public partial class MainWindow : Window
     {
         _showTrackMap = TrackMapToggle?.IsChecked == true;
         ClearCanvas();
-        _cachedTransformedFrames = null;
+        _cachedTransformedFrames = null; _boundsCacheFrameCount = -1;
         UpdateDisplay();
     }
 
@@ -501,48 +529,48 @@ public partial class MainWindow : Window
         if (!_viewModel.Buffer.HasData || _viewModel.CurrentFrame == null) return;
 
         var frames = _viewModel.Buffer.Frames;
+        if (frames.Count == 0) return;
+
+        // Rebuild cache if missing or stale
+        if (_cachedTransformedFrames == null || _cachedTransformedFrames.Count != frames.Count)
+            _cachedTransformedFrames = TransformFramesToCanvas(frames);
+
+        var cached = _cachedTransformedFrames;
+        int safeCount = Math.Min(frames.Count, cached.Count);
         int currentLap = _viewModel.CurrentFrame.CurrentLap;
-        
-        // Only search within frames on the current lap
-        var lapFrameIndices = new List<int>();
-        for (int i = 0; i < frames.Count; i++)
+
+        // Collect indices that belong to the current lap only
+        var lapIndices = new List<int>(safeCount / 4);
+        for (int i = 0; i < safeCount; i++)
         {
             if (frames[i].CurrentLap == currentLap)
-            {
-                lapFrameIndices.Add(i);
-            }
+                lapIndices.Add(i);
         }
-        
-        if (lapFrameIndices.Count == 0) return;
+        if (lapIndices.Count == 0) return;
 
-        // Use cached transformed frames if available
-        if (_cachedTransformedFrames == null)
+        // Subsample for drag performance
+        int step = Math.Max(1, lapIndices.Count / 2000);
+
+        double minDistSq = double.MaxValue;
+        int closestIndex = lapIndices[0];
+
+        for (int k = 0; k < lapIndices.Count; k += step)
         {
-            _cachedTransformedFrames = TransformFramesToCanvas(frames);
-        }
-
-        double minDistance = double.MaxValue;
-        int closestGlobalIndex = lapFrameIndices[0];
-
-        // Search only through lap frame indices in the cached transformed frames
-        foreach (var globalIndex in lapFrameIndices)
-        {
-            var frame = _cachedTransformedFrames[globalIndex];
-            var dx = frame.PosX - canvasPosition.X;
-            var dy = frame.PosY - canvasPosition.Y;
-            var distance = Math.Sqrt(dx * dx + dy * dy);
-
-            if (distance < minDistance)
+            int i = lapIndices[k];
+            var tf = cached[i];
+            double dx = tf.PosX - canvasPosition.X;
+            double dy = tf.PosY - canvasPosition.Y;
+            double distSq = dx * dx + dy * dy;
+            if (distSq < minDistSq)
             {
-                minDistance = distance;
-                closestGlobalIndex = globalIndex;
+                minDistSq = distSq;
+                closestIndex = i;
             }
         }
 
-        // Only update if we found a reasonably close point (within 100 pixels to be more forgiving)
-        if (minDistance < 100)
+        if (Math.Sqrt(minDistSq) < 200)
         {
-            _viewModel.ScrubToIndex(closestGlobalIndex);
+            _viewModel.ScrubToIndex(closestIndex);
             UpdateDisplay();
         }
     }
@@ -554,18 +582,18 @@ public partial class MainWindow : Window
         var pos = e.GetPosition(TrackCanvas);
         try
         {
-            var transform = TrackCanvas.RenderTransform.Value;
-            if (transform.HasInverse)
+            var rt = TrackCanvas.RenderTransform;
+            if (rt != null && rt != Transform.Identity)
             {
-                transform.Invert();
-                return transform.Transform(pos);
+                var inverse = rt.Inverse;
+                if (inverse != null)
+                    return inverse.Transform(pos);
             }
         }
         catch
         {
-            // Fallback to raw position if inversion fails
+            // Fall through — return raw position
         }
-
         return pos;
     }
 
@@ -673,16 +701,9 @@ public partial class MainWindow : Window
 
         if (canvasWidth == 0 || canvasHeight == 0) return new List<TelemetryFrame>();
 
-        // Use same transformation whether we have a track map or not
-        Log($"Transforming {frames.Count} frames to canvas");
-        
         // If we have old track centerline, use track coordinates (legacy)
         if (_trackCenterline != null && _trackCenterline.PointCount > 0)
         {
-            Log($"=== USING TRACK CENTERLINE (legacy) ===");
-            Log($"Centerline: {_trackCenterline.PointCount} points, {_trackCenterline.TrackLength:F1}m length");
-            Log($"Transforming {frames.Count} frames to track coordinates");
-            
             // Convert each frame: world coords → (s, d) → world meters → canvas
             var worldPoints = frames.Select(f => {
                 // World to track coordinates
@@ -715,8 +736,6 @@ public partial class MainWindow : Window
             double offsetX = (canvasWidth - rangeX * scale) / 2;
             double offsetY = (canvasHeight - rangeY * scale) / 2;
             
-            Log($"World bounds: X=[{minX:F1}, {maxX:F1}], Y=[{minY:F1}, {maxY:F1}]");
-            Log($"Scale: {scale:F4}, Offset: ({offsetX:F1}, {offsetY:F1})");
             
             return worldPoints.Select(p => {
                 var rawX = offsetX + (p.WorldX - minX) * scale;
@@ -742,7 +761,6 @@ public partial class MainWindow : Window
             }).ToList();
         }
         // Fallback: Auto-fit (no track map or centerline built yet)
-        Log($"No track map - using auto-fit transform");
 
         // Rotate by 80 degrees clockwise
         const double rotationRadians = (Math.PI / 2.0) - (10.0 * Math.PI / 180.0);
@@ -850,10 +868,19 @@ public partial class MainWindow : Window
 
         if (canvasWidth == 0 || canvasHeight == 0) return frame;
 
-        var minX = buffer.Frames.Min(f => f.PosX);
-        var maxX = buffer.Frames.Max(f => f.PosX);
-        var minY = buffer.Frames.Min(f => f.PosY);
-        var maxY = buffer.Frames.Max(f => f.PosY);
+        // Recompute bounds only when frame count changes (avoids 4 LINQ passes per render).
+        if (buffer.Frames.Count != _boundsCacheFrameCount)
+        {
+            _boundsMinX = buffer.Frames.Min(f => f.PosX);
+            _boundsMaxX = buffer.Frames.Max(f => f.PosX);
+            _boundsMinY = buffer.Frames.Min(f => f.PosY);
+            _boundsMaxY = buffer.Frames.Max(f => f.PosY);
+            _boundsCacheFrameCount = buffer.Frames.Count;
+        }
+        var minX = _boundsMinX;
+        var maxX = _boundsMaxX;
+        var minY = _boundsMinY;
+        var maxY = _boundsMaxY;
 
         if (maxX == minX) maxX = minX + 1;
         if (maxY == minY) maxY = minY + 1;
@@ -894,117 +921,270 @@ public partial class MainWindow : Window
             if (_viewModel.CurrentFrame != null)
             {
                 var frame = _viewModel.CurrentFrame;
-                
-                var modeText = _isReplayMode ? "📼 REPLAY" : (_viewModel.IsLiveMode ? "🔴 PLAYING" : "⏸️ PAUSED");
-                
-                var lapInfo = "";
-                if (frame.CurrentLap > 0)
-                {
-                    lapInfo = $"Lap: {frame.CurrentLap}";
-                    if (frame.Sector > 0 && frame.Sector <= 3)
-                    {
-                        lapInfo += $" | S{frame.Sector}";
-                    }
-                    if (frame.LapTime > 0)
-                    {
-                        var lapMinutes = (int)(frame.LapTime / 60);
-                        var lapSeconds = (int)(frame.LapTime % 60);
-                        var lapMillis = (int)((frame.LapTime % 1) * 1000);
-                        lapInfo += $" | {lapMinutes:D2}:{lapSeconds:D2},{lapMillis:D3}";
-                    }
-                    if (frame.LapDistance > 0)
-                    {
-                        lapInfo += $"\nDist: {frame.LapDistance:F1}m";
-                    }
-                    lapInfo += "\n";
-                }
-                
-                // Update telemetry display with the frame data
-                UpdateTelemetryDisplay(frame);
+
+                UpdateDataStrip(frame);
+                UpdateSidePanel(frame);
 
                 if (PedalCanvas != null && PedalCanvas.ActualWidth > 0)
-                {
                     _inputRenderer.DrawPedals(PedalCanvas, frame);
-                }
 
                 if (InputGraphCanvas != null && InputGraphCanvas.ActualWidth > 0)
-                {
-                    _inputRenderer.DrawInputGraphs(InputGraphCanvas, _viewModel.Buffer.Frames, 
-                                                    _viewModel.Buffer.CurrentIndex);
-                }
+                    _inputRenderer.DrawInputGraphs(InputGraphCanvas, ChannelLabelsPanel,
+                                                   _viewModel.Buffer.Frames, _viewModel.Buffer.CurrentIndex);
 
-                // Push data into the new Detailed Analysis view (read-only, derived locally)
-                DetailedAnalysisViewControl?.PushFrame(frame, _viewModel.Buffer.Frames);
-            }
-            else
-            {
-                if (TelemetryDataPanel != null)
-                {
-                    TelemetryDataPanel.Children.Clear();
-                    AddTelemetrySection(TelemetryDataPanel, "⏳ LOADING", "Generating telemetry data...", "#FFA500");
-                    AddTelemetrySection(TelemetryDataPanel, "💡 CONTROLS", "🖱️ Click & drag player icon on track\n▶️ Press play button to watch live\n📁 Load recording to replay", "#569CD6");
-                }
+                if (_detailWindow?.IsVisible == true)
+                    _detailWindow.PushFrame(frame, _viewModel.Buffer.Frames);
             }
         }
         catch (Exception ex)
         {
-            if (TelemetryDataPanel != null)
-            {
-                TelemetryDataPanel.Children.Clear();
-                AddTelemetrySection(TelemetryDataPanel, "⚠️ ERROR", $"Display failed: {ex.Message}", "#FF6B6B");
-            }
+            System.Diagnostics.Debug.WriteLine($"UpdateTelemetryDisplay error: {ex.Message}");
         }
     }
 
-    private void UpdateTelemetryDisplay(TelemetryFrame frame)
+    // Updates the data strip (row 1) with zero allocation — modifies existing XAML elements in-place.
+    private void UpdateDataStrip(TelemetryFrame frame)
     {
-        if (TelemetryDataPanel == null) return;
+        // Gear
+        string gearStr = frame.Gear switch { -1 => "R", 0 => "N", _ => frame.Gear.ToString() };
+        DsGear.Text = gearStr;
 
+        // RPM bar
+        double rpmMax = frame.RpmMax > 100 ? frame.RpmMax : 11000;
+        double rpmRatio = Math.Clamp(frame.Rpm / rpmMax, 0, 1);
+        DsRpmFilled.Width = new GridLength(rpmRatio, GridUnitType.Star);
+        DsRpmEmpty.Width  = new GridLength(Math.Max(0.001, 1 - rpmRatio), GridUnitType.Star);
+        DsRpmText.Text    = $"{frame.Rpm:F0}";
+        DsRpmMax.Text     = $"/ {rpmMax:F0}";
+
+        // Speed
+        DsSpeed.Text = $"{frame.Speed:F0}";
+
+        // Throttle mini bar
+        double tRatio = Math.Clamp(frame.Throttle, 0, 1);
+        DsThrottleFilled.Width = new GridLength(tRatio, GridUnitType.Star);
+        DsThrottleEmpty.Width  = new GridLength(Math.Max(0.001, 1 - tRatio), GridUnitType.Star);
+        DsThrottlePct.Text     = $"{tRatio * 100:F0}%";
+
+        // Brake mini bar
+        double bRatio = Math.Clamp(frame.Brake, 0, 1);
+        DsBrakeFilled.Width = new GridLength(bRatio, GridUnitType.Star);
+        DsBrakeEmpty.Width  = new GridLength(Math.Max(0.001, 1 - bRatio), GridUnitType.Star);
+        DsBrakePct.Text     = $"{bRatio * 100:F0}%";
+
+        // Lap / sector — rF2 lap numbers start at 0 (outlap), display 1-indexed
+        int displayLap = frame.CurrentLap + 1;
+        string lapStr = $"LAP {displayLap}";
+        if (frame.Sector >= 0 && frame.Sector <= 2) lapStr += $"  ·  S{frame.Sector + 1}";
+        DsLapSector.Text = lapStr;
+
+        // Compute best/last from the buffer when frame count changes.
+        // DuckDB replay frames don't carry BestLapTime/LastLapTime; we derive from timestamps.
+        ComputeLapTimesIfNeeded(_viewModel.Buffer.Frames);
+
+        float bestTime = _cachedBestLapTime > 0 ? _cachedBestLapTime
+                       : frame.BestLapTime  > 0 ? frame.BestLapTime : 0;
+        float lastTime = _cachedLastLapTime > 0 ? _cachedLastLapTime
+                       : frame.LastLapTime  > 0 ? frame.LastLapTime : 0;
+
+        DsBestLap.Text = bestTime > 0
+            ? $"BEST  {TimeSpan.FromSeconds(bestTime):m\\:ss\\.fff}"
+            : "BEST  —";
+        DsLastLap.Text = lastTime > 0
+            ? $"LAST  {TimeSpan.FromSeconds(lastTime):m\\:ss\\.fff}"
+            : "LAST  —";
+    }
+
+    // Computes best and last completed lap times from the frame buffer.
+    // Only re-runs when the frame count changes (cheap guard).
+    private void ComputeLapTimesIfNeeded(IReadOnlyList<TelemetryFrame> frames)
+    {
+        if (frames.Count == _lapTimeCacheFrameCount) return;
+        _lapTimeCacheFrameCount = frames.Count;
+
+        // Gather the first and last timestamp seen per lap number
+        var lapBounds = new Dictionary<int, (double first, double last)>();
+        foreach (var f in frames)
+        {
+            int lap = f.CurrentLap;
+            if (!lapBounds.TryGetValue(lap, out var b))
+                lapBounds[lap] = (f.Time, f.Time);
+            else if (f.Time > b.last)
+                lapBounds[lap] = (b.first, f.Time);
+        }
+
+        // A lap is "complete" only if the next lap number also exists in the data.
+        var sortedLaps = lapBounds.OrderBy(kv => kv.Key).ToList();
+        var completedTimes = new List<float>();
+        for (int i = 0; i < sortedLaps.Count - 1; i++)
+        {
+            var (first, last) = sortedLaps[i].Value;
+            float dur = (float)(last - first);
+            if (dur > 10f && dur < 600f) // sanity: 10 s — 10 min
+                completedTimes.Add(dur);
+        }
+
+        _cachedBestLapTime = completedTimes.Count > 0 ? completedTimes.Min() : 0;
+        _cachedLastLapTime = completedTimes.Count > 0 ? completedTimes[^1]  : 0;
+    }
+
+    // Build the side-panel controls exactly once; thereafter only update values.
+    private void EnsureSidePanelBuilt()
+    {
+        if (_sidePanelBuilt || TelemetryDataPanel == null) return;
+        _sidePanelBuilt = true;
         TelemetryDataPanel.Children.Clear();
 
-        // Time and Session Info
-        var timeInfo = $"⏱️ {frame.Time:F2}s";
-        var lapInfo = $"🏁 Lap {frame.CurrentLap}, Sector {frame.Sector}";
-        if (frame.LapDistance > 0)
-        {
-            lapInfo += $", Distance: {frame.LapDistance:F1}m";
-        }
-        AddTelemetrySection(TelemetryDataPanel, "SESSION", $"{timeInfo}  |  {lapInfo}", "#569CD6");
+        // SESSION
+        TelemetryDataPanel.Children.Add(SidePanelHeader("SESSION", "#569CD6"));
+        _sideSessionText = SidePanelValue("");
+        TelemetryDataPanel.Children.Add(_sideSessionText);
+        TelemetryDataPanel.Children.Add(SidePanelSeparator());
 
-        // Timing
-        AddTelemetrySection(TelemetryDataPanel, "TIMING", string.Empty, "#C586C0");
-        var timingPanel = CreateTimingPanel();
-        TelemetryDataPanel.Children.Add(timingPanel);
+        // TIMING
+        TelemetryDataPanel.Children.Add(SidePanelHeader("TIMING", "#C586C0"));
+        _sideTimingHost = new ContentControl();
+        TelemetryDataPanel.Children.Add(_sideTimingHost);
+        TelemetryDataPanel.Children.Add(SidePanelSeparator());
 
-        // Speed and Engine
-        var speedBar = CreateValueBar(frame.Speed / 300.0, $"Speed: {frame.Speed:F1} km/h");
-        AddTelemetrySection(TelemetryDataPanel, "ENGINE", string.Empty, "#FFD700");
-        var gearText = $"Gear: {(frame.Gear == 0 ? "N" : frame.Gear)}  |  RPM: {frame.Rpm:F0}";
-        var gearBlock = new TextBlock
+        // ENGINE
+        TelemetryDataPanel.Children.Add(SidePanelHeader("ENGINE", "#FFD700"));
+        _sideGearText = SidePanelValue("");
+        TelemetryDataPanel.Children.Add(_sideGearText);
+        (_sideSpeedFilled, _sideSpeedEmpty, _sideSpeedLabel) = BuildBarStrip(Color.FromRgb(0, 150, 255));
+        TelemetryDataPanel.Children.Add(WrapBarStrip(_sideSpeedFilled, _sideSpeedEmpty, _sideSpeedLabel));
+        TelemetryDataPanel.Children.Add(SidePanelSeparator());
+
+        // CONTROLS
+        TelemetryDataPanel.Children.Add(SidePanelHeader("CONTROLS", "#FF6B9D"));
+        (_sideThrottleFilled, _sideThrottleEmpty, _sideThrottleLabel) = BuildBarStrip(Color.FromRgb(0, 200, 0));
+        TelemetryDataPanel.Children.Add(WrapBarStrip(_sideThrottleFilled, _sideThrottleEmpty, _sideThrottleLabel));
+        (_sideBrakeFilled, _sideBrakeEmpty, _sideBrakeLabel) = BuildBarStrip(Color.FromRgb(220, 50, 50));
+        TelemetryDataPanel.Children.Add(WrapBarStrip(_sideBrakeFilled, _sideBrakeEmpty, _sideBrakeLabel));
+        _sideSteeringText = SidePanelValue("");
+        TelemetryDataPanel.Children.Add(_sideSteeringText);
+        TelemetryDataPanel.Children.Add(SidePanelSeparator());
+
+        // POSITION
+        TelemetryDataPanel.Children.Add(SidePanelHeader("POSITION", "#569CD6"));
+        _sidePosText = SidePanelValue("");
+        TelemetryDataPanel.Children.Add(_sidePosText);
+        TelemetryDataPanel.Children.Add(SidePanelSeparator());
+    }
+
+    // Update only the values inside the already-built side panel — zero allocations in steady state.
+    private void UpdateSidePanel(TelemetryFrame frame)
+    {
+        EnsureSidePanelBuilt();
+
+        // SESSION
+        var lap = $"Lap {frame.CurrentLap}";
+        if (frame.Sector > 0 && frame.Sector <= 3) lap += $"  S{frame.Sector}";
+        if (frame.LapDistance > 0) lap += $"  {frame.LapDistance:F0}m";
+        _sideSessionText!.Text = $"{frame.Time:F2}s  |  {lap}";
+
+        // TIMING (rebuild only when lap count changes)
+        var timing = CreateTimingPanel();
+        _sideTimingHost!.Content = timing;
+
+        // ENGINE
+        string gearLabel = frame.Gear switch { -1 => "R", 0 => "N", _ => frame.Gear.ToString() };
+        _sideGearText!.Text = $"Gear: {gearLabel}  |  RPM: {frame.Rpm:F0}";
+        UpdateBarStrip(_sideSpeedFilled!, _sideSpeedEmpty!, _sideSpeedLabel!, frame.Speed / 300.0, $"Speed: {frame.Speed:F1} km/h");
+
+        // CONTROLS
+        UpdateBarStrip(_sideThrottleFilled!, _sideThrottleEmpty!, _sideThrottleLabel!, frame.Throttle, $"Throttle: {frame.Throttle * 100:F0}%");
+        UpdateBarStrip(_sideBrakeFilled!, _sideBrakeEmpty!, _sideBrakeLabel!, frame.Brake, $"Brake: {frame.Brake * 100:F0}%");
+        _sideSteeringText!.Text = $"Steer: {frame.Steering:+0.00;-0.00;0.00}";
+
+        // POSITION
+        _sidePosText!.Text = $"X: {frame.PosX:F1}  Y: {frame.PosY:F1}";
+    }
+
+    // --- Side panel builder helpers (called once) ---------------------------
+
+    private static TextBlock SidePanelHeader(string title, string colorHex)
+        => new TextBlock
         {
-            Text = gearText,
-            Foreground = new SolidColorBrush(Color.FromRgb(200, 200, 200)),
-            FontSize = 11,
-            TextAlignment = TextAlignment.Center,
-            Margin = new Thickness(0, 0, 0, 2)
+            Text = title,
+            Foreground = new SolidColorBrush(ColorFromHexStatic(colorHex)),
+            FontSize = 11, FontWeight = FontWeights.Bold,
+            Margin = new Thickness(0, 5, 0, 3)
         };
-        TelemetryDataPanel.Children.Add(gearBlock);
-        TelemetryDataPanel.Children.Add(speedBar);
 
-        // Controls
-        var throttleBar = CreateInputBar(frame.Throttle, "Throttle", "#00FF00");
-        var brakeBar = CreateInputBar(frame.Brake, "Brake", "#FF0000");
-        AddTelemetrySection(TelemetryDataPanel, "CONTROLS", "", "#FF6B9D");
-        TelemetryDataPanel.Children.Add(throttleBar);
-        TelemetryDataPanel.Children.Add(brakeBar);
+    private static TextBlock SidePanelValue(string text)
+        => new TextBlock
+        {
+            Text = text,
+            Foreground = new SolidColorBrush(Color.FromRgb(200, 200, 200)),
+            FontSize = 11, Margin = new Thickness(5, 0, 0, 2)
+        };
 
-        // Steering
-        var steeringBar = CreateSteeringBar(frame.Steering);
-        TelemetryDataPanel.Children.Add(steeringBar);
+    private static Border SidePanelSeparator()
+        => new Border
+        {
+            Height = 1,
+            Background = new SolidColorBrush(Color.FromRgb(60, 60, 60)),
+            Margin = new Thickness(0, 5, 0, 0)
+        };
 
-        // Position
-        var posInfo = $"X: {frame.PosX:F2}  |  Y: {frame.PosY:F2}";
-        AddTelemetrySection(TelemetryDataPanel, "POSITION", posInfo, "#569CD6");
+    private static (ColumnDefinition filled, ColumnDefinition empty, TextBlock label) BuildBarStrip(Color barColor)
+    {
+        var filled = new ColumnDefinition { Width = new GridLength(0, GridUnitType.Star) };
+        var empty  = new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) };
+        var label  = new TextBlock
+        {
+            Foreground = System.Windows.Media.Brushes.White,
+            FontSize = 10,
+            VerticalAlignment = VerticalAlignment.Center,
+            Margin = new Thickness(4, 0, 0, 0)
+        };
+        return (filled, empty, label);
+    }
+
+    private static Border WrapBarStrip(ColumnDefinition filled, ColumnDefinition empty, TextBlock label)
+    {
+        // Pre-build the Grid with the colored fill border.
+        var fillColor = new SolidColorBrush(Color.FromRgb(0, 150, 255)); // overridden per call site
+        var grid = new Grid { Margin = new Thickness(0) };
+        grid.ColumnDefinitions.Add(filled);
+        grid.ColumnDefinitions.Add(empty);
+
+        var fillBorder = new Border { Background = new SolidColorBrush(Color.FromRgb(0, 150, 255)), CornerRadius = new CornerRadius(2) };
+        Grid.SetColumn(fillBorder, 0);
+        grid.Children.Add(fillBorder);
+        Grid.SetColumn(label, 0);
+        Grid.SetColumnSpan(label, 2);
+        grid.Children.Add(label);
+
+        return new Border
+        {
+            Margin = new Thickness(5, 3, 0, 3),
+            Background = new SolidColorBrush(Color.FromRgb(40, 40, 40)),
+            CornerRadius = new CornerRadius(3),
+            Padding = new Thickness(4),
+            Child = grid
+        };
+    }
+
+    private static void UpdateBarStrip(ColumnDefinition filled, ColumnDefinition empty, TextBlock label,
+                                       double value, string text)
+    {
+        value = Math.Clamp(value, 0, 1);
+        filled.Width = new GridLength(value, GridUnitType.Star);
+        empty.Width  = new GridLength(1 - value, GridUnitType.Star);
+        label.Text   = text;
+    }
+
+    private static Color ColorFromHexStatic(string hex)
+    {
+        hex = hex.TrimStart('#');
+        if (hex.Length == 6)
+            return Color.FromRgb(
+                Convert.ToByte(hex[..2], 16),
+                Convert.ToByte(hex[2..4], 16),
+                Convert.ToByte(hex[4..6], 16));
+        return Colors.White;
     }
 
     private UIElement CreateTimingPanel()
@@ -1170,196 +1350,43 @@ public partial class MainWindow : Window
         public TimeSpan LapTime { get; init; }
     }
 
-    private void AddTelemetrySection(StackPanel panel, string title, string content, string titleColor)
+    private void SaveRecordingButton_Click(object sender, RoutedEventArgs e)
     {
-        var titleBlock = new TextBlock
+        var frames = _viewModel.Buffer.Frames;
+        if (frames.Count == 0)
         {
-            Text = title,
-            Foreground = new SolidColorBrush(ColorFromHex(titleColor)),
-            FontSize = 11,
-            FontWeight = System.Windows.FontWeights.Bold,
-            Margin = new Thickness(0, 5, 0, 3)
-        };
-        panel.Children.Add(titleBlock);
-
-        if (!string.IsNullOrEmpty(content))
-        {
-            var contentBlock = new TextBlock
-            {
-                Text = content,
-                Foreground = new SolidColorBrush(Color.FromRgb(200, 200, 200)),
-                FontSize = 11,
-                TextWrapping = TextWrapping.Wrap,
-                Margin = new Thickness(5, 0, 0, 0)
-            };
-            panel.Children.Add(contentBlock);
+            MessageBox.Show("Buffer is empty. Drive in LMU to record telemetry first.",
+                            "Nothing to Save", MessageBoxButton.OK, MessageBoxImage.Information);
+            return;
         }
 
-        var separator = new Border
+        var dlg = new Microsoft.Win32.SaveFileDialog
         {
-            Height = 1,
-            Background = new SolidColorBrush(Color.FromRgb(60, 60, 60)),
-            Margin = new Thickness(0, 5, 0, 0)
+            Title = "Save Telemetry Recording",
+            Filter = "DuckDB telemetry (*.duckdb)|*.duckdb",
+            FileName = $"LMU_{DateTime.Now:yyyyMMdd_HHmmss}.duckdb"
         };
-        panel.Children.Add(separator);
-    }
+        if (dlg.ShowDialog(this) != true) return;
 
-    private Border CreateValueBar(double value, string label)
-    {
-        value = Math.Clamp(value, 0, 1);
-        var container = new Border
+        string trackName = frames[0].ExtendedData.TryGetValue("TrackName", out var tn) ? tn?.ToString() ?? "" : "";
+        string carName   = frames[0].ExtendedData.TryGetValue("VehicleName", out var cn) ? cn?.ToString() ?? "" : "";
+
+        try
         {
-            Margin = new Thickness(5, 3, 0, 3),
-            Background = new SolidColorBrush(Color.FromRgb(40, 40, 40)),
-            CornerRadius = new CornerRadius(3),
-            Padding = new Thickness(4)
-        };
+            StatusText.Text = "Saving…";
+            StatusText.Foreground = new SolidColorBrush(Colors.Yellow);
 
-        var grid = new Grid();
-        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(value, GridUnitType.Star) });
-        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1 - value, GridUnitType.Star) });
+            DuckDBTelemetryWriter.Write(dlg.FileName, frames, trackName, carName);
 
-        var filledBar = new Border
-        {
-            Background = new SolidColorBrush(Color.FromRgb(0, 150, 255)),
-            CornerRadius = new CornerRadius(2)
-        };
-        Grid.SetColumn(filledBar, 0);
-        grid.Children.Add(filledBar);
-
-        var labelBlock = new TextBlock
-        {
-            Text = label,
-            Foreground = System.Windows.Media.Brushes.White,
-            FontSize = 10,
-            VerticalAlignment = VerticalAlignment.Center,
-            Margin = new Thickness(4, 0, 0, 0)
-        };
-        Grid.SetColumn(labelBlock, 0);
-        Grid.SetColumnSpan(labelBlock, 2);
-        grid.Children.Add(labelBlock);
-
-        container.Child = grid;
-        return container;
-    }
-
-    private Border CreateInputBar(double value, string label, string color)
-    {
-        value = Math.Clamp(value, 0, 1);
-        var container = new Border
-        {
-            Margin = new Thickness(5, 3, 0, 3),
-            Background = new SolidColorBrush(Color.FromRgb(40, 40, 40)),
-            CornerRadius = new CornerRadius(3),
-            Padding = new Thickness(4)
-        };
-
-        var grid = new Grid();
-        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(value, GridUnitType.Star) });
-        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1 - value, GridUnitType.Star) });
-
-        var filledBar = new Border
-        {
-            Background = new SolidColorBrush(ColorFromHex(color)),
-            CornerRadius = new CornerRadius(2)
-        };
-        Grid.SetColumn(filledBar, 0);
-        grid.Children.Add(filledBar);
-
-        var labelBlock = new TextBlock
-        {
-            Text = $"{label}: {value * 100:F0}%",
-            Foreground = System.Windows.Media.Brushes.White,
-            FontSize = 10,
-            VerticalAlignment = VerticalAlignment.Center,
-            Margin = new Thickness(4, 0, 0, 0)
-        };
-        Grid.SetColumn(labelBlock, 0);
-        Grid.SetColumnSpan(labelBlock, 2);
-        grid.Children.Add(labelBlock);
-
-        container.Child = grid;
-        return container;
-    }
-
-    private Border CreateSteeringBar(double steering)
-    {
-        steering = Math.Clamp(steering, -1, 1);
-        var container = new Border
-        {
-            Margin = new Thickness(5, 3, 0, 3),
-            Background = System.Windows.Media.Brushes.Black,
-            CornerRadius = new CornerRadius(3),
-            Padding = new Thickness(4)
-        };
-
-        var grid = new Grid();
-        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(0.5, GridUnitType.Star) });
-        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(0.5, GridUnitType.Star) });
-
-        // Left side (left steering)
-        if (steering < 0)
-        {
-            var leftBar = new Border
-            {
-                Background = new SolidColorBrush(Color.FromRgb(0, 150, 255)),
-                CornerRadius = new CornerRadius(2)
-            };
-            Grid.SetColumn(leftBar, 0);
-            var leftGrid = new Grid();
-            leftGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1 - (-steering), GridUnitType.Star) });
-            leftGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(-steering, GridUnitType.Star) });
-            Grid.SetColumn(leftBar, 1); // fill from center to the left
-            leftGrid.Children.Add(leftBar);
-            grid.Children.Add(leftGrid);
+            StatusText.Text = $"Saved: {System.IO.Path.GetFileName(dlg.FileName)}";
+            StatusText.Foreground = new SolidColorBrush(Colors.LimeGreen);
         }
-
-        // Right side (right steering)
-        if (steering > 0)
+        catch (Exception ex)
         {
-            var rightBar = new Border
-            {
-                Background = new SolidColorBrush(Color.FromRgb(0, 150, 255)),
-                CornerRadius = new CornerRadius(2),
-                HorizontalAlignment = System.Windows.HorizontalAlignment.Right
-            };
-            var rightGrid = new Grid();
-            rightGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(steering, GridUnitType.Star) });
-            rightGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1 - steering, GridUnitType.Star) });
-            Grid.SetColumn(rightGrid, 1);
-            Grid.SetColumn(rightBar, 0); // fill from center to the right
-            rightGrid.Children.Add(rightBar);
-            grid.Children.Add(rightGrid);
+            StatusText.Text = "Save failed";
+            StatusText.Foreground = new SolidColorBrush(Colors.Red);
+            MessageBox.Show($"Save failed:\n{ex.Message}", "Error", MessageBoxButton.OK, MessageBoxImage.Error);
         }
-
-        var labelBlock = new TextBlock
-        {
-            Text = $"Steering: {steering:F2}  {'◄' + new string('═', (int)Math.Abs(steering * 5)) + (steering > 0 ? "►" : "◄")}",
-            Foreground = System.Windows.Media.Brushes.White,
-            FontSize = 10,
-            VerticalAlignment = System.Windows.VerticalAlignment.Center,
-            HorizontalAlignment = System.Windows.HorizontalAlignment.Center,
-            Margin = new Thickness(0, 0, 0, 0)
-        };
-        Grid.SetColumn(labelBlock, 0);
-        Grid.SetColumnSpan(labelBlock, 2);
-        grid.Children.Add(labelBlock);
-
-        container.Child = grid;
-        return container;
-    }
-
-    private Color ColorFromHex(string hex)
-    {
-        hex = hex.TrimStart('#');
-        if (hex.Length == 6)
-        {
-            return Color.FromRgb(
-                Convert.ToByte(hex.Substring(0, 2), 16),
-                Convert.ToByte(hex.Substring(2, 2), 16),
-                Convert.ToByte(hex.Substring(4, 2), 16));
-        }
-        return Colors.White;
     }
 
     private void LoadRecordingButton_Click(object sender, RoutedEventArgs e)
@@ -1477,7 +1504,7 @@ public partial class MainWindow : Window
             _isPaused = true;
             _viewModel.IsLiveMode = false;
             _replayTimer?.Stop(); // Make sure timer is stopped initially
-            _cachedTransformedFrames = null; // Clear cache to force redraw
+            _cachedTransformedFrames = null; _boundsCacheFrameCount = -1; _lapTimeCacheFrameCount = -1; _sliderMarkerFrameCount = -1; // Clear cache to force redraw
             _carArrow = null; // Clear car arrow reference
             _timingCache = null;
             _timingCacheFrameCount = -1;
@@ -1489,11 +1516,9 @@ public partial class MainWindow : Window
             if (_viewModel.CurrentFrame != null)
             {
                 var curr = _viewModel.CurrentFrame;
-                Console.WriteLine($"After ScrubToIndex(0): CurrentIndex={_viewModel.Buffer.CurrentIndex}, Lap={curr.CurrentLap}, Time={curr.Time:F2}s");
                 System.Diagnostics.Debug.WriteLine($"After ScrubToIndex(0): CurrentIndex={_viewModel.Buffer.CurrentIndex}, Time={curr.Time:F2}s, Speed={curr.Speed:F1}km/h, GPS=({curr.PosX:F6},{curr.PosY:F6})");
             }
 
-            Console.WriteLine("Calling UpdateDisplay to draw initial lap");
             System.Diagnostics.Debug.WriteLine("Updating display");
 
             // Update display
@@ -1526,7 +1551,7 @@ public partial class MainWindow : Window
             if (hasTrackMap && _showTrackMap)
             {
                 ClearCanvas();
-                _cachedTransformedFrames = null;
+                _cachedTransformedFrames = null; _boundsCacheFrameCount = -1;
                 DrawCenterline();
                 UpdateDisplay();
             }
@@ -1713,32 +1738,94 @@ public partial class MainWindow : Window
     }
     
     private bool _isUpdatingSlider = false;
-    
+    private int _sliderMarkerFrameCount = -1; // rebuild markers only when frame count changes
+
     private void UpdateTimeSlider()
     {
-        if (_viewModel.CurrentFrame != null && TimeSlider != null && !_isUpdatingSlider)
+        if (_viewModel.CurrentFrame == null || TimeSlider == null || _isUpdatingSlider) return;
+
+        _isUpdatingSlider = true;
+
+        var frames = _viewModel.Buffer.Frames;
+        if (frames.Count > 0)
         {
-            _isUpdatingSlider = true;
-            
-            if (_viewModel.Buffer.Frames.Count > 0)
+            TimeSlider.Maximum = frames.Count - 1;
+            TimeSlider.Value   = _viewModel.Buffer.CurrentIndex;
+            TimeSlider.IsEnabled = true;
+
+            // Rebuild the lap/sector markers only when the buffer size changes
+            if (frames.Count != _sliderMarkerFrameCount)
             {
-                TimeSlider.Maximum = _viewModel.Buffer.Frames.Count - 1;
-                TimeSlider.Value = _viewModel.Buffer.CurrentIndex;
-                TimeSlider.IsEnabled = true;
+                _sliderMarkerFrameCount = frames.Count;
+                RebuildSliderMarkers(frames);
             }
-            
-            // Update time text
-            var time = _viewModel.CurrentFrame.Time;
-            var minutes = (int)(time / 60);
-            var seconds = (int)(time % 60);
-            var millis = (int)((time - Math.Floor(time)) * 1000);
-            if (TimeText != null)
-            {
-                TimeText.Text = $"{minutes}:{seconds:D2}.{millis:D3}";
-            }
-            
-            _isUpdatingSlider = false;
         }
+
+        var time = _viewModel.CurrentFrame.Time;
+        if (TimeText != null)
+            TimeText.Text = $"{(int)(time / 60)}:{(int)(time % 60):D2}.{(int)((time % 1) * 1000):D3}";
+
+        _isUpdatingSlider = false;
+    }
+
+    private void RebuildSliderMarkers(IReadOnlyList<TelemetryFrame> frames)
+    {
+        if (SliderMarkersCanvas == null || frames.Count == 0) return;
+
+        SliderMarkersCanvas.Children.Clear();
+
+        // Wait until the canvas has been laid out so ActualWidth is valid.
+        // If not yet available, defer to next layout pass.
+        SliderMarkersCanvas.Dispatcher.InvokeAsync(() =>
+        {
+            SliderMarkersCanvas.Children.Clear();
+            double w = SliderMarkersCanvas.ActualWidth;
+            if (w < 1) return;
+
+            int total = frames.Count;
+
+            // Track which laps and sectors we've already marked so we draw each boundary once.
+            int prevLap    = frames[0].CurrentLap;
+            int prevSector = frames[0].Sector;
+
+            for (int i = 1; i < total; i++)
+            {
+                var f = frames[i];
+                double x = (double)i / (total - 1) * w;
+
+                bool lapChange    = f.CurrentLap != prevLap;
+                bool sectorChange = f.Sector     != prevSector && !lapChange;
+
+                if (lapChange)
+                {
+                    // Solid white line — lap boundary, full height
+                    var line = new System.Windows.Shapes.Line
+                    {
+                        X1 = x, Y1 = 0, X2 = x, Y2 = 20,
+                        Stroke          = new SolidColorBrush(Color.FromArgb(230, 255, 255, 255)),
+                        StrokeThickness = 2,
+                        IsHitTestVisible = false,
+                    };
+                    SliderMarkersCanvas.Children.Add(line);
+                    prevLap    = f.CurrentLap;
+                    prevSector = f.Sector;
+                }
+                else if (sectorChange)
+                {
+                    // Dashed line — sector boundary, clearly visible yellow-white
+                    var line = new System.Windows.Shapes.Line
+                    {
+                        X1 = x, Y1 = 1, X2 = x, Y2 = 19,
+                        Stroke          = new SolidColorBrush(Color.FromArgb(200, 220, 200, 100)),
+                        StrokeThickness = 1.5,
+                        StrokeDashArray = new DoubleCollection { 3, 2 },
+                        IsHitTestVisible = false,
+                    };
+                    SliderMarkersCanvas.Children.Add(line);
+                    prevSector = f.Sector;
+                }
+            }
+        }, System.Windows.Threading.DispatcherPriority.Loaded);
     }
 
     /// <summary>
@@ -1826,7 +1913,7 @@ public partial class MainWindow : Window
                 DeleteTrackMapButton.Visibility = Visibility.Visible;
                 
                 // Force redraw with track map
-                _cachedTransformedFrames = null;
+                _cachedTransformedFrames = null; _boundsCacheFrameCount = -1;
                 return true;
             }
             else
@@ -1994,7 +2081,7 @@ public partial class MainWindow : Window
             if (!string.IsNullOrEmpty(_currentTrackName) && _currentTrackName == trackName)
             {
                 _generatedTrackMap = trackMap;
-                _cachedTransformedFrames = null; // Force redraw
+                _cachedTransformedFrames = null; _boundsCacheFrameCount = -1; // Force redraw
                 
                 // Update button visibility
                 GenerateTrackMapButton.Visibility = Visibility.Collapsed;
@@ -2004,7 +2091,7 @@ public partial class MainWindow : Window
             {
                 // Track name didn't match current - load it anyway and show message
                 _generatedTrackMap = trackMap;
-                _cachedTransformedFrames = null;
+                _cachedTransformedFrames = null; _boundsCacheFrameCount = -1;
                 GenerateTrackMapButton.Visibility = Visibility.Collapsed;
                 DeleteTrackMapButton.Visibility = Visibility.Visible;
             }
@@ -2082,7 +2169,7 @@ public partial class MainWindow : Window
             
             // Clear from current session
             _generatedTrackMap = null;
-            _cachedTransformedFrames = null;
+            _cachedTransformedFrames = null; _boundsCacheFrameCount = -1;
             
             // Update button visibility
             GenerateTrackMapButton.Visibility = Visibility.Visible;
@@ -2155,7 +2242,7 @@ public partial class MainWindow : Window
             _trackCenterline.BuildFromLaps(laps);
             
             // Force redraw with new centerline
-            _cachedTransformedFrames = null;
+            _cachedTransformedFrames = null; _boundsCacheFrameCount = -1;
             
             Log($"✓ Centerline built: {_trackCenterline.PointCount} points, {_trackCenterline.TrackLength:F1}m total length");
             Log("All telemetry will now use track coordinates (s, d) instead of GPS→SVG");

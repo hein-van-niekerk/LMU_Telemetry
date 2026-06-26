@@ -1,13 +1,10 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
 using LMU_Telemetry.Models;
 using System.Windows.Controls;
 using System.Windows.Media;
 using System.Windows.Shapes;
-using Brush = System.Windows.Media.Brush;
 using Brushes = System.Windows.Media.Brushes;
 using Color = System.Windows.Media.Color;
 
@@ -15,69 +12,82 @@ namespace LMU_Telemetry.Rendering
 {
     public class TrackRenderer
     {
-        // Draw the complete track outline (full racing line)
+        // Draw the complete track outline for live mode (all accumulated frames)
         public void DrawTrack(Canvas canvas, IReadOnlyList<TelemetryFrame> frames)
         {
             if (frames.Count < 2) return;
 
-            // Limit how many segments we draw to prevent performance issues
-            var step = Math.Max(1, frames.Count / 1000); // Max 1000 line segments
-
-            // Draw ALL segments to show complete track outline
-            for (int i = step; i < frames.Count; i += step)
+            // Bounding-box based jump threshold
+            float minX = float.MaxValue, maxX = float.MinValue;
+            float minY = float.MaxValue, maxY = float.MinValue;
+            foreach (var f in frames)
             {
-                var prevFrame = frames[i - step];
-                var currentFrame = frames[i];
-
-                var line = new Line
-                {
-                    X1 = prevFrame.PosX,
-                    Y1 = prevFrame.PosY,
-                    X2 = currentFrame.PosX,
-                    Y2 = currentFrame.PosY,
-                    Stroke = GetSpeedColor(currentFrame.Speed),
-                    StrokeThickness = 2
-                };
-                canvas.Children.Add(line);
+                if (f.PosX < minX) minX = f.PosX; if (f.PosX > maxX) maxX = f.PosX;
+                if (f.PosY < minY) minY = f.PosY; if (f.PosY > maxY) maxY = f.PosY;
             }
+            double diag = Math.Sqrt((maxX - minX) * (double)(maxX - minX) +
+                                    (maxY - minY) * (double)(maxY - minY));
+            double maxJump = Math.Max(diag * 0.08, 10.0);
+
+            var pts = new PointCollection();
+            Color col = InputColor(frames[0].Throttle, frames[0].Brake);
+            float prevX = frames[0].PosX, prevY = frames[0].PosY;
+            pts.Add(new System.Windows.Point(prevX, prevY));
+
+            void Flush()
+            {
+                if (pts.Count < 2) { pts.Clear(); return; }
+                canvas.Children.Add(new Polyline { Points = pts, Stroke = new SolidColorBrush(col), StrokeThickness = 1.5, StrokeLineJoin = PenLineJoin.Round });
+                pts = new PointCollection();
+            }
+
+            for (int i = 1; i < frames.Count; i++)
+            {
+                var f = frames[i];
+                double dx = f.PosX - prevX, dy = f.PosY - prevY;
+                if (Math.Sqrt(dx * dx + dy * dy) > maxJump) { Flush(); pts.Add(new System.Windows.Point(f.PosX, f.PosY)); prevX = f.PosX; prevY = f.PosY; col = InputColor(f.Throttle, f.Brake); continue; }
+                Color c = InputColor(f.Throttle, f.Brake);
+                if (c != col) { Flush(); pts.Add(new System.Windows.Point(prevX, prevY)); col = c; }
+                pts.Add(new System.Windows.Point(f.PosX, f.PosY));
+                prevX = f.PosX; prevY = f.PosY;
+            }
+            Flush();
         }
 
-        // Draw the driven path up to current position with throttle/brake coloring
+        // Draw the driven path up to current position with throttle/brake coloring.
+        // NOTE: DrawCompleteLap now renders the full lap ghost; this method is kept
+        // for compatibility but not called in the replay path (lap ghost covers it).
         public void DrawDrivenPath(Canvas canvas, IReadOnlyList<TelemetryFrame> frames, int currentIndex, int currentLap)
         {
             if (frames.Count < 2 || currentIndex < 1) return;
 
-            // Find the start of the current lap
-            int lapStartIndex = 0;
+            int lapStart = 0;
             for (int i = currentIndex; i >= 0; i--)
             {
-                if (frames[i].CurrentLap != currentLap)
-                {
-                    lapStartIndex = i + 1;
-                    break;
-                }
+                if (frames[i].CurrentLap != currentLap) { lapStart = i + 1; break; }
             }
 
-            // Aggressively optimize - max 100 segments for entire lap
-            var lapLength = currentIndex - lapStartIndex;
-            var step = Math.Max(1, lapLength / 100);
+            var pts = new PointCollection();
+            Color col = InputColor(frames[lapStart].Throttle, frames[lapStart].Brake);
+            float prevX = frames[lapStart].PosX, prevY = frames[lapStart].PosY;
+            pts.Add(new System.Windows.Point(prevX, prevY));
 
-            for (int i = lapStartIndex + step; i <= currentIndex; i += step)
+            void Flush()
             {
-                var prevFrame = frames[i - step];
-                var currentFrame = frames[i];
-
-                var line = new Line
-                {
-                    X1 = prevFrame.PosX,
-                    Y1 = prevFrame.PosY,
-                    X2 = currentFrame.PosX,
-                    Y2 = currentFrame.PosY,
-                    Stroke = GetInputColor(currentFrame.Throttle, currentFrame.Brake),
-                    StrokeThickness = 3.8 // 5% thinner than previous 4px
-                };
-                canvas.Children.Add(line);
+                if (pts.Count < 2) { pts.Clear(); return; }
+                canvas.Children.Add(new Polyline { Points = pts, Stroke = new SolidColorBrush(col), StrokeThickness = 3.0, StrokeLineJoin = PenLineJoin.Round });
+                pts = new PointCollection();
             }
+
+            for (int i = lapStart + 1; i <= currentIndex; i++)
+            {
+                var f = frames[i];
+                Color c = InputColor(f.Throttle, f.Brake);
+                if (c != col) { Flush(); pts.Add(new System.Windows.Point(prevX, prevY)); col = c; }
+                pts.Add(new System.Windows.Point(f.PosX, f.PosY));
+                prevX = f.PosX; prevY = f.PosY;
+            }
+            Flush();
         }
         
         // Draw the COMPLETE lap path for a given lap number
@@ -85,85 +95,83 @@ namespace LMU_Telemetry.Rendering
         {
             if (frames.Count < 2) return;
 
-            // Find start and end of this lap
-            int lapStartIndex = -1;
-            int lapEndIndex = -1;
-            
+            // Collect lap frame indices
+            int lapStart = -1, lapEnd = -1;
             for (int i = 0; i < frames.Count; i++)
             {
-                if (frames[i].CurrentLap == lapNumber)
+                if (frames[i].CurrentLap != lapNumber) continue;
+                if (lapStart == -1) lapStart = i;
+                lapEnd = i;
+            }
+            if (lapStart == -1) return;
+
+            // Compute adaptive jump threshold from the lap's bounding box.
+            // Any segment longer than 8% of the track diagonal is a teleport — skip it.
+            float minX = float.MaxValue, maxX = float.MinValue;
+            float minY = float.MaxValue, maxY = float.MinValue;
+            for (int i = lapStart; i <= lapEnd; i++)
+            {
+                var f = frames[i];
+                if (f.PosX < minX) minX = f.PosX;
+                if (f.PosX > maxX) maxX = f.PosX;
+                if (f.PosY < minY) minY = f.PosY;
+                if (f.PosY > maxY) maxY = f.PosY;
+            }
+            double diag = Math.Sqrt((maxX - minX) * (double)(maxX - minX) +
+                                    (maxY - minY) * (double)(maxY - minY));
+            double maxJump = Math.Max(diag * 0.08, 10.0);
+
+            // Draw as Polyline segments, breaking on teleport gaps.
+            // Group consecutive frames by input state for throttle/brake coloring.
+            // Strategy: one Polyline per run of same color, broken by gaps.
+            var currentPoints = new PointCollection();
+            Color currentColor = Color.FromRgb(255, 255, 255);
+            float prevX = frames[lapStart].PosX, prevY = frames[lapStart].PosY;
+
+            void FlushPolyline()
+            {
+                if (currentPoints.Count < 2) { currentPoints.Clear(); return; }
+                canvas.Children.Add(new Polyline
                 {
-                    if (lapStartIndex == -1)
-                        lapStartIndex = i;
-                    lapEndIndex = i;
+                    Points          = currentPoints,
+                    Stroke          = new SolidColorBrush(currentColor),
+                    StrokeThickness = 1.5,
+                    StrokeLineJoin  = PenLineJoin.Round,
+                });
+                currentPoints = new PointCollection();
+            }
+
+            currentPoints.Add(new System.Windows.Point(prevX, prevY));
+
+            for (int i = lapStart + 1; i <= lapEnd; i++)
+            {
+                var f = frames[i];
+                double dx = f.PosX - prevX, dy = f.PosY - prevY;
+                double dist = Math.Sqrt(dx * dx + dy * dy);
+
+                // Teleport gap — break the polyline here
+                if (dist > maxJump)
+                {
+                    FlushPolyline();
+                    currentPoints.Add(new System.Windows.Point(f.PosX, f.PosY));
+                    prevX = f.PosX; prevY = f.PosY;
+                    currentColor = InputColor(f.Throttle, f.Brake);
+                    continue;
                 }
-            }
-            
-            if (lapStartIndex == -1 || lapEndIndex == -1)
-            {
-                return; // Lap not found
-            }
 
-            // Draw complete lap - max 300 segments for smooth line
-            var lapLength = lapEndIndex - lapStartIndex;
-            var step = Math.Max(1, lapLength / 300);
-
-            int prevIndex = lapStartIndex;
-            for (int i = lapStartIndex + step; i <= lapEndIndex; i += step)
-            {
-                var prevFrame = frames[prevIndex];
-                var currentFrame = frames[i];
-
-                var line = new Line
+                Color segColor = InputColor(f.Throttle, f.Brake);
+                if (segColor != currentColor)
                 {
-                    X1 = prevFrame.PosX,
-                    Y1 = prevFrame.PosY,
-                    X2 = currentFrame.PosX,
-                    Y2 = currentFrame.PosY,
-                    Stroke = GetInputColor(currentFrame.Throttle, currentFrame.Brake),
-                    StrokeThickness = 1.425 // 5% thinner than previous 1.5px to match driven path ratio
-                };
-                canvas.Children.Add(line);
+                    // Carry last point into next polyline so lines join cleanly
+                    FlushPolyline();
+                    currentPoints.Add(new System.Windows.Point(prevX, prevY));
+                    currentColor = segColor;
+                }
 
-                prevIndex = i;
+                currentPoints.Add(new System.Windows.Point(f.PosX, f.PosY));
+                prevX = f.PosX; prevY = f.PosY;
             }
-
-            // Ensure the final segment reaches the lap end
-            if (prevIndex != lapEndIndex)
-            {
-                var prevFrame = frames[prevIndex];
-                var endFrame = frames[lapEndIndex];
-                var finalLine = new Line
-                {
-                    X1 = prevFrame.PosX,
-                    Y1 = prevFrame.PosY,
-                    X2 = endFrame.PosX,
-                    Y2 = endFrame.PosY,
-                    Stroke = GetInputColor(endFrame.Throttle, endFrame.Brake),
-                    StrokeThickness = 1.425
-                };
-                canvas.Children.Add(finalLine);
-            }
-
-            // Close the loop near the finish line if the endpoints are close
-            var startFrame = frames[lapStartIndex];
-            var lastFrame = frames[lapEndIndex];
-            var dxClose = startFrame.PosX - lastFrame.PosX;
-            var dyClose = startFrame.PosY - lastFrame.PosY;
-            var closeDistance = Math.Sqrt(dxClose * dxClose + dyClose * dyClose);
-            if (closeDistance < 80)
-            {
-                var closeLine = new Line
-                {
-                    X1 = lastFrame.PosX,
-                    Y1 = lastFrame.PosY,
-                    X2 = startFrame.PosX,
-                    Y2 = startFrame.PosY,
-                    Stroke = GetInputColor(lastFrame.Throttle, lastFrame.Brake),
-                    StrokeThickness = 1.425
-                };
-                canvas.Children.Add(closeLine);
-            }
+            FlushPolyline();
         }
 
         // Draw sector and lap markers on the trace
@@ -216,7 +224,7 @@ namespace LMU_Telemetry.Rendering
                 for (int col = 0; col < 2; col++)
                 {
                     // Alternate black/white
-                    Brush squareColor = ((row + col) % 2 == 0) ? Brushes.White : Brushes.Black;
+                    System.Windows.Media.Brush squareColor = ((row + col) % 2 == 0) ? Brushes.White : Brushes.Black;
                     
                     var rect = new System.Windows.Shapes.Rectangle
                     {
@@ -278,126 +286,58 @@ namespace LMU_Telemetry.Rendering
             canvas.Children.Add(text);
         }
 
-        // Helper to draw a marker at a position (DEPRECATED - kept for compatibility)
-        private void DrawMarker(Canvas canvas, float posX, float posY, Brush color, double size, string label)
-        {
-            // Draw circle marker
-            var circle = new Ellipse
-            {
-                Width = size,
-                Height = size,
-                Fill = color,
-                Stroke = Brushes.Black,
-                StrokeThickness = 1
-            };
-            Canvas.SetLeft(circle, posX - size / 2);
-            Canvas.SetTop(circle, posY - size / 2);
-            canvas.Children.Add(circle);
-
-            // Add text label
-            var text = new TextBlock
-            {
-                Text = label,
-                Foreground = Brushes.White,
-                FontSize = 10,
-                FontWeight = System.Windows.FontWeights.Bold,
-                TextAlignment = System.Windows.TextAlignment.Center
-            };
-            Canvas.SetLeft(text, posX - 15);
-            Canvas.SetTop(text, posY + size / 2 + 5);
-            canvas.Children.Add(text);
-        }
-
         public System.Windows.Shapes.Polygon DrawCar(Canvas canvas, TelemetryFrame frame, TelemetryFrame? previousFrame = null)
         {
-            // Calculate heading angle from movement direction
+            // Heading from movement direction
             double heading = 0;
-            
             if (previousFrame != null)
             {
-                // Calculate heading from position change
                 float dx = frame.PosX - previousFrame.PosX;
                 float dy = frame.PosY - previousFrame.PosY;
-                
                 if (Math.Abs(dx) > 0.01 || Math.Abs(dy) > 0.01)
-                {
                     heading = Math.Atan2(dy, dx) * 180 / Math.PI;
-                }
             }
 
-            // Create arrow shape - triangle pointing in direction of travel
-            double arrowSize = 12.0;
-            double arrowWidth = 8.0;
-            
-            // Arrow points: tip at front, two base points
+            // Sleek chevron — pointed nose, notched tail
             var points = new PointCollection
             {
-                new System.Windows.Point(arrowSize, 0),        // Tip (front)
-                new System.Windows.Point(-arrowSize/2, arrowWidth/2),   // Base left
-                new System.Windows.Point(-arrowSize/2, -arrowWidth/2)   // Base right
+                new System.Windows.Point( 11,   0),   // nose
+                new System.Windows.Point(-5.5,  4),   // rear-left
+                new System.Windows.Point(-2.5,  0),   // tail notch
+                new System.Windows.Point(-5.5, -4),   // rear-right
             };
-            
+
             var arrow = new System.Windows.Shapes.Polygon
             {
-                Points = points,
-                Fill = Brushes.Red,
-                Stroke = Brushes.White,
-                StrokeThickness = 1.5
+                Points          = points,
+                Fill            = new SolidColorBrush(Color.FromRgb(255, 60, 60)),
+                Stroke          = new SolidColorBrush(Color.FromArgb(200, 255, 255, 255)),
+                StrokeThickness = 0.8,
+                Cursor          = System.Windows.Input.Cursors.SizeAll,
+                ToolTip         = "Drag to scrub replay",
             };
-            
-            // Apply rotation and translation
-            var transformGroup = new TransformGroup();
-            transformGroup.Children.Add(new RotateTransform(heading, 0, 0));
-            transformGroup.Children.Add(new TranslateTransform(frame.PosX, frame.PosY));
-            arrow.RenderTransform = transformGroup;
-            
+
+            var tg = new TransformGroup();
+            tg.Children.Add(new RotateTransform(heading, 0, 0));
+            tg.Children.Add(new TranslateTransform(frame.PosX, frame.PosY));
+            arrow.RenderTransform = tg;
+
             canvas.Children.Add(arrow);
-            
-            return arrow; // Return the arrow so caller can track and remove it later
+            return arrow;
         }
 
-        private Brush GetSpeedColor(float speed)
+        // Returns a Color (not Brush) so callers can compare cheaply without allocating
+        private static Color InputColor(float throttle, float brake)
         {
-            // Color code based on speed (FR-11: driven line color based on speed)
-            var normalizedSpeed = Math.Clamp(speed / 200f, 0f, 1f); // Assume max 200 km/h
-
-            if (normalizedSpeed < 0.3f)
-                return new SolidColorBrush(Color.FromRgb(255, 0, 0)); // Red - slow
-            else if (normalizedSpeed < 0.6f)
-                return new SolidColorBrush(Color.FromRgb(255, 255, 0)); // Yellow - medium
-            else if (normalizedSpeed < 0.8f)
-                return new SolidColorBrush(Color.FromRgb(0, 255, 0)); // Green - fast
-            else
-                return new SolidColorBrush(Color.FromRgb(0, 255, 255)); // Cyan - very fast
-        }
-        
-        private Brush GetInputColor(float throttle, float brake)
-        {
-            // Priority: braking overrides throttle coloring
             if (brake > 0.1f)
-            {
-                if (brake >= 0.5f)
-                {
-                    // Dark red for heavy braking (50-100%)
-                    return new SolidColorBrush(Color.FromRgb(150, 0, 0));
-                }
-                // Lighter red for mild braking (<50%)
-                return new SolidColorBrush(Color.FromRgb(210, 60, 40));
-            }
-
+                return brake >= 0.5f
+                    ? Color.FromRgb(150,   0,  0)   // heavy braking
+                    : Color.FromRgb(210,  60, 40);   // light braking
             if (throttle > 0.1f)
-            {
-                if (throttle >= 0.99f)
-                {
-                    // Lighter green at full throttle
-                    return new SolidColorBrush(Color.FromRgb(0, 220, 140));
-                }
-                // Darker green when on throttle but not 100%
-                return new SolidColorBrush(Color.FromRgb(0, 150, 70));
-            }
-
-            // Coasting
-            return new SolidColorBrush(Color.FromRgb(80, 80, 80));
+                return throttle >= 0.99f
+                    ? Color.FromRgb(  0, 220, 140)   // full throttle
+                    : Color.FromRgb(  0, 150,  70);  // partial throttle
+            return Color.FromRgb(80, 80, 80);        // coasting
         }
     }
 }

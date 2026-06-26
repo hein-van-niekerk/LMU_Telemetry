@@ -154,12 +154,8 @@ public class TelemetryDataProcessor
         // GPS Speed is in m/s, convert to km/h
         float speed = (float)(speedValue * 3.6);
         
-        // Validate - racing cars shouldn't exceed 400 km/h
         if (speed > 400)
-        {
-            System.Diagnostics.Debug.WriteLine($"WARNING: Speed {speed:F1} km/h is unrealistic at t={timestamp:F3}s");
-            speed = 0;
-        }
+            speed = 400; // clamp; don't zero (zeroing creates false speed spikes)
         
         var gearValue = GetIntValueAtTime(intChannels, "Gear", timestamp);
         

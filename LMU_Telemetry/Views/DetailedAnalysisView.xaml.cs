@@ -142,7 +142,10 @@ namespace LMU_Telemetry.Views
 
             if (TyreHeatBar != null)
             {
-                var temp = GetExtended(latest, "TyresTempCentre") ?? 0;
+                double avgTemp = 0;
+                if (latest != null && latest.ExtendedData.TryGetValue("TyresTempCentre", out var raw) && raw is double[] arr && arr.Length > 0)
+                    avgTemp = arr.Average();
+                var temp = avgTemp > 0 ? avgTemp : GetExtended(latest, "TyresTempCentre") ?? 0;
                 double t = Math.Clamp(temp / 150.0, 0, 1);
                 TyreHeatBar.Fill = new LinearGradientBrush(Colors.DarkBlue, Colors.OrangeRed, 0)
                 {
@@ -165,10 +168,10 @@ namespace LMU_Telemetry.Views
             var canvas = BrakeCanvas;
             if (canvas == null || _frames.Count == 0) return;
 
-            DrawSeries(canvas, f => GetExtended(f, "Brakes Temp"), Colors.OrangeRed, 1.2);
-            DrawSeries(canvas, f => GetExtended(f, "Brakes Air Temp"), Colors.LightBlue, 1.0);
-            DrawSeries(canvas, f => GetExtended(f, "Brake Thickness"), Colors.MediumPurple, 1.0);
-            DrawSeries(canvas, f => GetExtended(f, "Brakes Force"), Colors.LightGreen, 1.0);
+            DrawSeries(canvas, f => GetExtended(f, "Brake Temp FL"), Colors.OrangeRed, 1.2);
+            DrawSeries(canvas, f => GetExtended(f, "Brake Temp FR"), Colors.Tomato, 1.0, opacity: 0.7);
+            DrawSeries(canvas, f => GetExtended(f, "Brake Air Temp FL"), Colors.LightBlue, 1.0);
+            DrawSeries(canvas, f => GetExtended(f, "Brake Disc Thickness FL"), Colors.MediumPurple, 1.0);
             DrawCrosshair(canvas);
         }
 
@@ -178,10 +181,10 @@ namespace LMU_Telemetry.Views
             var canvas = AeroCanvas;
             if (canvas == null || _frames.Count == 0) return;
 
-            DrawSeries(canvas, f => GetExtended(f, "FrontRideHeight"), Colors.LightSkyBlue, 1.2);
-            DrawSeries(canvas, f => GetExtended(f, "RearRideHeight"), Colors.MediumPurple, 1.2);
-            DrawSeries(canvas, f => GetExtended(f, "FrontDownForce"), Colors.LightGreen, 1.0);
-            DrawSeries(canvas, f => GetExtended(f, "ReadDownForce"), Colors.Orange, 1.0);
+            DrawSeries(canvas, f => GetExtended(f, "Ride Height Front"), Colors.LightSkyBlue, 1.2);
+            DrawSeries(canvas, f => GetExtended(f, "Ride Height Rear"),  Colors.MediumPurple, 1.2);
+            DrawSeries(canvas, f => GetExtended(f, "Front Downforce"),   Colors.LightGreen,   1.0);
+            DrawSeries(canvas, f => GetExtended(f, "Rear Downforce"),    Colors.Orange,        1.0);
             DrawSeries(canvas, f => GetExtended(f, "Ground Speed"), Colors.Gray, 0.7, opacity: 0.4);
             DrawCrosshair(canvas);
         }
@@ -422,6 +425,7 @@ namespace LMU_Telemetry.Views
             {
                 if (raw is double d) return d;
                 if (raw is float f) return f;
+                if (raw is double[] arr && arr.Length > 0) return arr[0];
                 if (double.TryParse(Convert.ToString(raw, CultureInfo.InvariantCulture), out var parsed)) return parsed;
             }
             return null;
@@ -439,11 +443,20 @@ namespace LMU_Telemetry.Views
             return yaw.HasValue && Math.Abs(yaw.Value) > 15;
         }
 
+        private static double? GetExtendedIdx(TelemetryFrame? frame, string key, int idx)
+        {
+            if (frame == null) return null;
+            if (frame.ExtendedData.TryGetValue(key, out var raw) && raw is double[] arr && idx < arr.Length)
+                return arr[idx];
+            return null;
+        }
+
         private UIElement CreateTyreCard(TelemetryFrame? frame, string label)
         {
-            var temp = GetExtended(frame, $"TyresTempCentre");
-            var pressure = GetExtended(frame, "TyresPressure");
-            var wear = GetExtended(frame, "Tyres Wear");
+            int idx = label switch { "FL" => 0, "FR" => 1, "RL" => 2, "RR" => 3, _ => 0 };
+            var temp     = GetExtendedIdx(frame, "TyresTempCentre", idx);
+            var pressure = GetExtendedIdx(frame, "TyresPressure",   idx);
+            var wear     = GetExtendedIdx(frame, "TyresWear",       idx);
 
             var border = new Border
             {

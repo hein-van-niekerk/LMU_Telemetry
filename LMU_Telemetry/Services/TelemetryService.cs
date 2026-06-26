@@ -11,8 +11,10 @@ namespace LMU_Telemetry.Services
     {
         private readonly SharedMemoryReader _sharedMemory;
         private readonly TelemetryBuffer _buffer;
-        private readonly System.Threading.Timer _timer;
+        private readonly System.Threading.Timer _pollTimer;
+        private readonly System.Threading.Timer _reconnectTimer;
         private bool _isRunning = false;
+        private bool _isDisposed = false;
         private int _lastLapNumber = -1;
         private double _lastLapStartTime = 0;
 
@@ -29,41 +31,54 @@ namespace LMU_Telemetry.Services
         {
             _sharedMemory = new SharedMemoryReader();
             _buffer = new TelemetryBuffer();
-            // 60Hz telemetry polling (NFR-1)
-            _timer = new System.Threading.Timer(PollTelemetry, null, Timeout.Infinite, Timeout.Infinite);
+            _pollTimer      = new System.Threading.Timer(PollTelemetry,  null, Timeout.Infinite, Timeout.Infinite);
+            _reconnectTimer = new System.Threading.Timer(TryReconnect,   null, Timeout.Infinite, Timeout.Infinite);
         }
 
+        // Called once at startup — begins waiting for LMU silently; no error noise until first attempt.
         public void Start()
         {
-            if (_isRunning) return;
+            if (_isRunning || _isDisposed) return;
+            ConnectionStatusChanged?.Invoke(this, "Waiting for LMU...");
+            // Attempt immediately, then retry every 3 s until connected.
+            _reconnectTimer.Change(0, 3000);
+        }
 
-            // Try to connect to LMU
+        private void TryReconnect(object? state)
+        {
+            if (_isRunning || _isDisposed) return;
+
             if (_sharedMemory.Connect())
             {
+                _reconnectTimer.Change(Timeout.Infinite, Timeout.Infinite); // stop retrying
                 _isRunning = true;
-                _timer.Change(0, 16); // ~60Hz (16ms interval)
+                _pollTimer.Change(0, 16); // ~60 Hz
                 ConnectionStatusChanged?.Invoke(this, "Connected to LMU");
             }
-            else
-            {
-                ConnectionStatusChanged?.Invoke(this, "Failed to connect - Is LMU running?");
-            }
+            // else: silently wait for next retry — no status spam
+        }
+
+        private void LoseConnection(string reason)
+        {
+            _isRunning = false;
+            _pollTimer.Change(Timeout.Infinite, Timeout.Infinite);
+            _sharedMemory.Disconnect();
+            ConnectionStatusChanged?.Invoke(this, reason);
+            // Start retrying so we reconnect when LMU is restarted
+            if (!_isDisposed)
+                _reconnectTimer.Change(3000, 3000);
         }
 
         public void Stop()
         {
-            _isRunning = false;
-            _timer.Change(Timeout.Infinite, Timeout.Infinite);
-            _sharedMemory.Disconnect();
-            ConnectionStatusChanged?.Invoke(this, "Disconnected");
+            _reconnectTimer.Change(Timeout.Infinite, Timeout.Infinite);
+            LoseConnection("Disconnected");
         }
 
         public void TogglePause()
         {
-            if (_isRunning)
-                Stop();
-            else
-                Start();
+            if (_isRunning) Stop();
+            else Start();
         }
 
         private void PollTelemetry(object? state)
@@ -72,58 +87,42 @@ namespace LMU_Telemetry.Services
 
             try
             {
-                // FR-1: Read from shared memory
                 var frame = _sharedMemory.ReadTelemetry();
 
                 if (frame == null)
                 {
-                    // Connection lost (NFR-3: handle game closing)
-                    if (_isRunning)
-                    {
-                        Stop();
-                        ConnectionStatusChanged?.Invoke(this, "Connection lost - Game closed?");
-                    }
+                    LoseConnection("Connection lost — is LMU running?");
                     return;
                 }
 
-                // FR-4: Add to buffer
                 _buffer.Add(frame);
-
-                // FR-16: Detect lap boundaries
                 DetectLapChange(frame);
-
-                // Notify listeners
                 NewFrameReceived?.Invoke(this, frame);
             }
             catch (Exception ex)
             {
-                // NFR-3: Handle errors gracefully
-                if (_isRunning)
-                {
-                    Stop();
-                    ConnectionStatusChanged?.Invoke(this, $"Error: {ex.Message}");
-                }
+                LoseConnection($"Error: {ex.Message}");
             }
         }
 
-        // FR-16: Lap boundary detection
+        // FR-16: Lap boundary detection using the real lap number from the sim.
         private void DetectLapChange(TelemetryFrame frame)
         {
-            // Simple lap detection: check if time wraps or explicit lap number change
-            // In real implementation, would use lap number from telemetry
-            var currentLap = (int)(frame.Time / 120.0); // Assume ~2min laps for mock
+            var currentLap = frame.CurrentLap;
 
-            if (currentLap != _lastLapNumber && _lastLapNumber >= 0)
+            if (currentLap != _lastLapNumber && _lastLapNumber >= 0 && currentLap > _lastLapNumber)
             {
-                // Lap completed
+                // Prefer the sim's measured lap time; fall back to elapsed-time delta.
+                double lapTime = frame.LastLapTime > 0 ? frame.LastLapTime : frame.Time - _lastLapStartTime;
+
                 var lapInfo = new LapInfo
                 {
                     LapNumber = _lastLapNumber,
                     StartTime = _lastLapStartTime,
                     EndTime = frame.Time,
-                    LapTime = frame.Time - _lastLapStartTime,
+                    LapTime = lapTime,
                     IsValid = true,
-                    IsBestLap = false // Would calculate based on best time
+                    IsBestLap = frame.BestLapTime > 0 && Math.Abs(lapTime - frame.BestLapTime) < 0.001
                 };
 
                 Session.Laps.Add(lapInfo);
@@ -138,9 +137,13 @@ namespace LMU_Telemetry.Services
 
         public void Dispose()
         {
-            Stop();
-            _timer?.Dispose();
+            _isDisposed = true;
+            _reconnectTimer.Change(Timeout.Infinite, Timeout.Infinite);
+            _pollTimer.Change(Timeout.Infinite, Timeout.Infinite);
+            _isRunning = false;
             _sharedMemory?.Dispose();
+            _pollTimer?.Dispose();
+            _reconnectTimer?.Dispose();
         }
     }
 }
