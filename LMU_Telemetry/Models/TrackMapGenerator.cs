@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Windows;
+using LMU.Analysis.Engine.TrackGeometry;
 using LMU.Telemetry.Core.Models;
 using Point = System.Windows.Point;
 
@@ -289,88 +290,19 @@ public class TrackMapGenerator
 
     /// <summary>
     /// Calculate heading angle and curvature for each point.
+    /// Delegates the math to LMU.Analysis.Engine, converting at the WPF Point boundary.
     /// </summary>
     private static List<TrackPoint> CalculateHeadingAndCurvature(List<Point> points)
     {
-        var trackPoints = new List<TrackPoint>();
-        
-        if (points.Count < 3)
+        var geometryPoints = points.Select(p => new GeometryPoint(p.X, p.Y)).ToList();
+        var curvaturePoints = CornerDetector.CalculateHeadingAndCurvature(geometryPoints);
+
+        return curvaturePoints.Select(cp => new TrackPoint
         {
-            // Not enough points for derivatives
-            foreach (var point in points)
-            {
-                trackPoints.Add(new TrackPoint
-                {
-                    Position = point,
-                    Heading = 0,
-                    Curvature = 0
-                });
-            }
-            return trackPoints;
-        }
-
-        for (int i = 0; i < points.Count; i++)
-        {
-            var point = points[i];
-            
-            // Calculate heading (tangent direction)
-            double heading;
-            if (i == 0)
-            {
-                // Forward difference
-                heading = Math.Atan2(
-                    points[i + 1].Y - points[i].Y,
-                    points[i + 1].X - points[i].X
-                );
-            }
-            else if (i == points.Count - 1)
-            {
-                // Backward difference
-                heading = Math.Atan2(
-                    points[i].Y - points[i - 1].Y,
-                    points[i].X - points[i - 1].X
-                );
-            }
-            else
-            {
-                // Central difference
-                heading = Math.Atan2(
-                    points[i + 1].Y - points[i - 1].Y,
-                    points[i + 1].X - points[i - 1].X
-                );
-            }
-
-            // Calculate curvature (rate of change of heading)
-            double curvature = 0;
-            if (i > 0 && i < points.Count - 1)
-            {
-                // First derivatives (velocity)
-                double dx = (points[i + 1].X - points[i - 1].X) / 2.0;
-                double dy = (points[i + 1].Y - points[i - 1].Y) / 2.0;
-                
-                // Second derivatives (acceleration)
-                double ddx = points[i + 1].X - 2 * points[i].X + points[i - 1].X;
-                double ddy = points[i + 1].Y - 2 * points[i].Y + points[i - 1].Y;
-                
-                // Curvature formula: κ = |x'y'' - y'x''| / (x'² + y'²)^(3/2)
-                double numerator = Math.Abs(dx * ddy - dy * ddx);
-                double denominator = Math.Pow(dx * dx + dy * dy, 1.5);
-                
-                if (denominator > 1e-6)
-                {
-                    curvature = numerator / denominator;
-                }
-            }
-
-            trackPoints.Add(new TrackPoint
-            {
-                Position = point,
-                Heading = heading,
-                Curvature = curvature
-            });
-        }
-
-        return trackPoints;
+            Position = new Point(cp.Position.X, cp.Position.Y),
+            Heading = cp.Heading,
+            Curvature = cp.Curvature
+        }).ToList();
     }
 
     /// <summary>
@@ -390,75 +322,26 @@ public class TrackMapGenerator
 
     /// <summary>
     /// Detect corners from track points based on curvature peaks.
+    /// Delegates to LMU.Analysis.Engine, converting at the WPF Point boundary.
     /// </summary>
     private static List<Corner> DetectCorners(List<TrackPoint> trackPoints)
     {
-        var corners = new List<Corner>();
-        if (trackPoints.Count < 10) return corners;
-
-        // Find local maxima of curvature (high curvature = tight corner)
-        var cornerIndices = new List<(int index, double curvature)>();
-        double curvatureThreshold = 0.005; // Minimum curvature to consider as corner
-
-        for (int i = 3; i < trackPoints.Count - 3; i++)
+        var curvaturePoints = trackPoints.Select(tp => new CurvaturePoint
         {
-            double curvature = trackPoints[i].Curvature;
-            
-            // Check if this is a local maximum and above threshold
-            if (curvature > curvatureThreshold &&
-                curvature > trackPoints[i - 1].Curvature &&
-                curvature > trackPoints[i - 2].Curvature &&
-                curvature > trackPoints[i + 1].Curvature &&
-                curvature > trackPoints[i + 2].Curvature)
-            {
-                cornerIndices.Add((i, curvature));
-            }
-        }
+            Position = new GeometryPoint(tp.Position.X, tp.Position.Y),
+            Heading = tp.Heading,
+            Curvature = tp.Curvature
+        }).ToList();
 
-        // Filter to remove adjacent peaks (same corner detected multiple times)
-        var filteredCorners = new List<(int index, double curvature)>();
-        int minDistance = 20; // Minimum points between corners
+        var detectedCorners = CornerDetector.DetectCorners(curvaturePoints);
 
-        foreach (var (index, curvature) in cornerIndices)
+        return detectedCorners.Select(dc => new Corner
         {
-            if (filteredCorners.Count == 0 || 
-                index - filteredCorners.Last().index >= minDistance)
-            {
-                filteredCorners.Add((index, curvature));
-            }
-        }
-
-        // Create Corner objects with sequential numbering
-        double lapDistance = 0;
-        for (int i = 0; i < filteredCorners.Count; i++)
-        {
-            int idx = filteredCorners[i].index;
-            var point = trackPoints[idx];
-
-            // Calculate distance along track up to this point
-            if (idx > 0)
-            {
-                for (int j = 1; j <= idx; j++)
-                {
-                    double dx = trackPoints[j].Position.X - trackPoints[j - 1].Position.X;
-                    double dy = trackPoints[j].Position.Y - trackPoints[j - 1].Position.Y;
-                    lapDistance += Math.Sqrt(dx * dx + dy * dy);
-                }
-            }
-
-            corners.Add(new Corner
-            {
-                Number = i + 1,
-                Position = point.Position,
-                Curvature = point.Curvature,
-                LapDistance = lapDistance
-            });
-
-            lapDistance = 0; // Reset for next calculation
-        }
-
-        System.Diagnostics.Debug.WriteLine($"Detected {corners.Count} corners on track");
-        return corners;
+            Number = dc.Number,
+            Position = new Point(dc.Position.X, dc.Position.Y),
+            Curvature = dc.Curvature,
+            LapDistance = dc.LapDistance
+        }).ToList();
     }
 }
 
