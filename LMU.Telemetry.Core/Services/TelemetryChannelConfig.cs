@@ -1,6 +1,6 @@
 using System.Collections.Generic;
 
-namespace LMU_Telemetry.Services;
+namespace LMU.Telemetry.Core.Services;
 
 /// <summary>
 /// Configuration for a telemetry channel including its sampling frequency

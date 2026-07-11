@@ -4,9 +4,9 @@ using System.Linq;
 using MathNet.Numerics;
 using MathNet.Numerics.Interpolation;
 using DuckDB.NET.Data;
-using LMU_Telemetry.Models;
+using LMU.Telemetry.Core.Models;
 
-namespace LMU_Telemetry.Services;
+namespace LMU.Telemetry.Core.Services;
 
 /// <summary>
 /// Processes raw DuckDB telemetry data with proper time-alignment, resampling, and filtering

@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Windows;
+using LMU.Telemetry.Core.Models;
 using Point = System.Windows.Point;
 
 namespace LMU_Telemetry.Models;

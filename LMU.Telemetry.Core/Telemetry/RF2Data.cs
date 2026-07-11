@@ -7,7 +7,7 @@ using System.Runtime.InteropServices;
 // These structs are byte-exact to the plugin's rF2Data.cs (Pack = 4,
 // CharSet.Ansi). Do not reorder fields or change array sizes — the marshaller
 // relies on this layout to read the correct memory offsets.
-namespace LMU_Telemetry.Telemetry
+namespace LMU.Telemetry.Core.Telemetry
 {
     public static class RF2Constants
     {

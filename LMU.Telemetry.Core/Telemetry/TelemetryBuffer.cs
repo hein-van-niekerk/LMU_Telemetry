@@ -1,9 +1,9 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Linq;
-using LMU_Telemetry.Models;
+using LMU.Telemetry.Core.Models;
 
-namespace LMU_Telemetry.Telemetry.LMU_Telemetry.Telemetry
+namespace LMU.Telemetry.Core.Telemetry
 {
     public class TelemetryBuffer
     {

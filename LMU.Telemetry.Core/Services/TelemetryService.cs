@@ -1,10 +1,9 @@
 using System;
 using System.Threading;
-using LMU_Telemetry.Models;
-using LMU_Telemetry.Telemetry;
-using LMU_Telemetry.Telemetry.LMU_Telemetry.Telemetry;
+using LMU.Telemetry.Core.Models;
+using LMU.Telemetry.Core.Telemetry;
 
-namespace LMU_Telemetry.Services
+namespace LMU.Telemetry.Core.Services
 {
     // Real telemetry service with LMU integration and lap detection
     public class TelemetryService : IDisposable

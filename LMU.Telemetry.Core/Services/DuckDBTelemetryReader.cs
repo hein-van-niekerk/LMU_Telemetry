@@ -3,9 +3,9 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using DuckDB.NET.Data;
-using LMU_Telemetry.Models;
+using LMU.Telemetry.Core.Models;
 
-namespace LMU_Telemetry.Services;
+namespace LMU.Telemetry.Core.Services;
 
 public class DuckDBTelemetryReader
 {

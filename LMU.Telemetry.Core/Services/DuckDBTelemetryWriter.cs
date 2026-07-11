@@ -1,9 +1,9 @@
 using System;
 using System.Collections.Generic;
 using DuckDB.NET.Data;
-using LMU_Telemetry.Models;
+using LMU.Telemetry.Core.Models;
 
-namespace LMU_Telemetry.Services;
+namespace LMU.Telemetry.Core.Services;
 
 public static class DuckDBTelemetryWriter
 {

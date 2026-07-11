@@ -1,7 +1,7 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Linq;
-using LMU_Telemetry.Models;
+using LMU.Telemetry.Core.Models;
 using System.Windows.Controls;
 using System.Windows.Media;
 using System.Windows.Shapes;

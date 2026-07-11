@@ -1,6 +1,8 @@
 using System;
+using System.Collections.Generic;
 using System.Linq;
 using System.Text;
+using LMU.Telemetry.Core.Models;
 
 namespace LMU_Telemetry.Services;
 
@@ -12,7 +14,7 @@ public static class TelemetrySyncValidator
     /// <summary>
     /// Generates a synchronization report showing how well channels are aligned
     /// </summary>
-    public static string GenerateSyncReport(List<Models.TelemetryFrame> frames)
+    public static string GenerateSyncReport(List<TelemetryFrame> frames)
     {
         if (frames.Count == 0)
             return "No frames to analyze";
@@ -86,7 +88,7 @@ public static class TelemetrySyncValidator
     /// <summary>
     /// Checks if a specific frame's data is consistent
     /// </summary>
-    public static bool ValidateFrame(Models.TelemetryFrame frame)
+    public static bool ValidateFrame(TelemetryFrame frame)
     {
         // Basic sanity checks
         if (frame.Time < 0) return false;

@@ -7,7 +7,7 @@ using System.Windows.Controls;
 using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Shapes;
-using LMU_Telemetry.Models;
+using LMU.Telemetry.Core.Models;
 
 using MediaColor = System.Windows.Media.Color;
 using WpfUserControl = System.Windows.Controls.UserControl;

@@ -1,6 +1,6 @@
 using System;
 
-namespace LMU_Telemetry.Models;
+namespace LMU.Telemetry.Core.Models;
 
 public class TelemetryFileInfo
 {

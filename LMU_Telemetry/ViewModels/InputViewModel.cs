@@ -1,7 +1,7 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
-using LMU_Telemetry.Models;
+using LMU.Telemetry.Core.Models;
 
 namespace LMU_Telemetry.ViewModels
 {

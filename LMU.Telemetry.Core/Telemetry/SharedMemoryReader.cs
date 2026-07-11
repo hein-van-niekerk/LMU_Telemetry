@@ -3,9 +3,9 @@ using System.IO;
 using System.IO.MemoryMappedFiles;
 using System.Runtime.InteropServices;
 using System.Text;
-using LMU_Telemetry.Models;
+using LMU.Telemetry.Core.Models;
 
-namespace LMU_Telemetry.Telemetry
+namespace LMU.Telemetry.Core.Telemetry
 {
     // FR-1: Read telemetry from LMU / rFactor2 shared memory.
     //

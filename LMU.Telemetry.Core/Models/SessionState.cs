@@ -1,7 +1,7 @@
 ﻿using System;
 using System.Collections.Generic;
 
-namespace LMU_Telemetry.Models
+namespace LMU.Telemetry.Core.Models
 {
     // FR-17: Session and lap handling
     public class SessionState

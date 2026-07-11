@@ -1,8 +1,8 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Windows.Input;
-using LMU_Telemetry.Models;
-using LMU_Telemetry.Telemetry.LMU_Telemetry.Telemetry;
+using LMU.Telemetry.Core.Models;
+using LMU.Telemetry.Core.Telemetry;
 
 namespace LMU_Telemetry.ViewModels
 {

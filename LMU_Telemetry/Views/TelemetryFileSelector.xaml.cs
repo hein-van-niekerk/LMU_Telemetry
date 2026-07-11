@@ -3,8 +3,8 @@ using System.Collections.Generic;
 using System.IO;
 using System.Windows;
 using System.Windows.Controls;
-using LMU_Telemetry.Models;
-using LMU_Telemetry.Services;
+using LMU.Telemetry.Core.Models;
+using LMU.Telemetry.Core.Services;
 using WinForms = System.Windows.Forms;
 using MessageBox = System.Windows.MessageBox;
 

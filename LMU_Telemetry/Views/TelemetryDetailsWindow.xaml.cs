@@ -1,6 +1,6 @@
 using System.Collections.Generic;
 using System.Windows;
-using LMU_Telemetry.Models;
+using LMU.Telemetry.Core.Models;
 
 namespace LMU_Telemetry.Views;
 

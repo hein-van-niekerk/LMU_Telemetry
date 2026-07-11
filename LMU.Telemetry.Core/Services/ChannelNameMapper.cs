@@ -1,7 +1,7 @@
 using System.Collections.Generic;
 using System.Linq;
 
-namespace LMU_Telemetry.Services;
+namespace LMU.Telemetry.Core.Services;
 
 /// <summary>
 /// Maps canonical channel names to possible alternative names in the database

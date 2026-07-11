@@ -4,7 +4,7 @@ using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
 
-namespace LMU_Telemetry.Models
+namespace LMU.Telemetry.Core.Models
 {
     public sealed class TelemetryFrame
     {

@@ -1,6 +1,6 @@
 ﻿using System;
 
-namespace LMU_Telemetry.Models
+namespace LMU.Telemetry.Core.Models
 {
     // FR-3: Additional car state information
     public class CarState
