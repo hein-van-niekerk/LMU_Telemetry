@@ -11,6 +11,7 @@ using LMU_Telemetry.Models;
 using LMU.Telemetry.Core.Models;
 using LMU.Telemetry.Core.Services;
 using LMU.Telemetry.Core.Simulation;
+using LMU.Telemetry.Core.Telemetry;
 using LMU.Analysis.Engine.Timing;
 using LMU_Telemetry.ViewModels;
 using LMU_Telemetry.Views;
@@ -23,11 +24,12 @@ namespace LMU_Telemetry;
 
 public partial class MainWindow : Window
 {
-    private readonly object _telemetryService;
+    private readonly ITelemetrySource _telemetryService;
     private readonly TrackRenderer _trackRenderer;
     private readonly InputRenderer _inputRenderer;
     private readonly MainViewModel _viewModel;
     private readonly DuckDBTelemetryReader _duckDbReader;
+    private readonly PlaybackController _playbackController;
     private bool _useMockData = false;
     private bool _isUpdating = false;
     private DateTime _lastRenderTime = DateTime.MinValue;
@@ -35,8 +37,6 @@ public partial class MainWindow : Window
     private bool _isInputGraphDragging = false;
     private bool _isPaused = true;
     private bool _isReplayMode = false;
-    private int _playbackSpeedMultiplier = 1; // 1x, 2x, or 4x speed
-    private System.Windows.Threading.DispatcherTimer? _replayTimer;
     private List<TelemetryFrame>? _cachedTransformedFrames = null;
     private double _zoomFactor = 1.0;
     private const double ZoomMin = 0.5;
@@ -112,23 +112,20 @@ public partial class MainWindow : Window
 
         if (_useMockData)
         {
-            var mockService = new MockTelemetryService();
-            mockService.NewFrameReceived += OnNewFrame;
-            _telemetryService = mockService;
+            _telemetryService = new MockTelemetryService();
         }
         else
         {
             var realService = new TelemetryService();
-            realService.NewFrameReceived += OnNewFrame;
             realService.ConnectionStatusChanged += OnConnectionStatusChanged;
             realService.LapCompleted += OnLapCompleted;
             _telemetryService = realService;
         }
+        _telemetryService.FrameReceived += OnNewFrame;
 
-        // Initialize replay timer (60Hz playback)
-        _replayTimer = new System.Windows.Threading.DispatcherTimer();
-        _replayTimer.Interval = TimeSpan.FromMilliseconds(16); // ~60Hz
-        _replayTimer.Tick += ReplayTimer_Tick;
+        // Replay playback (timer, speed multiplier, pause) - LMU.Telemetry.Core.Telemetry.PlaybackController
+        _playbackController = new PlaybackController(_viewModel.Buffer);
+        _playbackController.FrameAdvanceRequested += OnPlaybackFrameAdvanceRequested;
 
         Loaded += MainWindow_Loaded;
         Closed += MainWindow_Closed;
@@ -160,6 +157,7 @@ public partial class MainWindow : Window
     private void MainWindow_Closed(object? sender, EventArgs e)
     {
         _detailWindow?.ForceClose();
+        _playbackController.Dispose();
         if (_telemetryService is IDisposable disposable)
         {
             disposable.Dispose();
@@ -199,21 +197,14 @@ public partial class MainWindow : Window
             
             if (_isReplayMode)
             {
-                // In replay mode, control the replay timer
+                // In replay mode, control playback via PlaybackController
                 if (_isPaused)
                 {
-                    _replayTimer?.Stop();
+                    _playbackController.Pause();
                 }
                 else
                 {
-                    if (_replayTimer == null)
-                    {
-                        MessageBox.Show("Replay timer not initialized.\n\nPlease reload the recording.",
-                                       "Error", MessageBoxButton.OK, MessageBoxImage.Warning);
-                        _isPaused = true;
-                        return;
-                    }
-                    _replayTimer.Start();
+                    _playbackController.Play();
                 }
             }
             else
@@ -243,14 +234,14 @@ public partial class MainWindow : Window
 
     private void Speed2xButton_Click(object sender, RoutedEventArgs e)
     {
-        if (_playbackSpeedMultiplier == 2)
+        if (_playbackController.SpeedMultiplier == 2)
         {
-            _playbackSpeedMultiplier = 1; // Toggle back to 1x
+            _playbackController.SetSpeedMultiplier(1); // Toggle back to 1x
             Speed2xButton.Background = new SolidColorBrush(Color.FromRgb(85, 85, 85));
         }
         else
         {
-            _playbackSpeedMultiplier = 2;
+            _playbackController.SetSpeedMultiplier(2);
             Speed2xButton.Background = new SolidColorBrush(Color.FromRgb(100, 200, 100));
             Speed4xButton.Background = new SolidColorBrush(Color.FromRgb(85, 85, 85));
         }
@@ -258,14 +249,14 @@ public partial class MainWindow : Window
 
     private void Speed4xButton_Click(object sender, RoutedEventArgs e)
     {
-        if (_playbackSpeedMultiplier == 4)
+        if (_playbackController.SpeedMultiplier == 4)
         {
-            _playbackSpeedMultiplier = 1; // Toggle back to 1x
+            _playbackController.SetSpeedMultiplier(1); // Toggle back to 1x
             Speed4xButton.Background = new SolidColorBrush(Color.FromRgb(85, 85, 85));
         }
         else
         {
-            _playbackSpeedMultiplier = 4;
+            _playbackController.SetSpeedMultiplier(4);
             Speed4xButton.Background = new SolidColorBrush(Color.FromRgb(100, 200, 100));
             Speed2xButton.Background = new SolidColorBrush(Color.FromRgb(85, 85, 85));
         }
@@ -328,31 +319,17 @@ public partial class MainWindow : Window
         return bestIndex;
     }
 
-    private void ReplayTimer_Tick(object? sender, EventArgs e)
+    // PlaybackController ticks on a background timer (see LMU.Telemetry.Core.Telemetry.PlaybackController)
+    // and asks us to scrub to nextIndex - marshal to the UI thread, same pattern as OnNewFrame.
+    private void OnPlaybackFrameAdvanceRequested(object? sender, int nextIndex)
     {
-        if (_isReplayMode && !_isPaused && _viewModel.Buffer.HasData)
+        Dispatcher.BeginInvoke(() =>
         {
-            // Advance by speed multiplier frames
-            var nextIndex = _viewModel.Buffer.CurrentIndex + _playbackSpeedMultiplier;
-            
-            if (nextIndex >= _viewModel.Buffer.Frames.Count)
-            {
-                // Loop back to start
-                nextIndex = 0;
-            }
-            
+            if (!_isReplayMode || _isPaused || !_viewModel.Buffer.HasData) return;
+
             _viewModel.ScrubToIndex(nextIndex);
-            UpdateDisplay(); // This will only redraw if lap changed
-            
-            // Debug every 300 frames (~5 seconds) instead of every 60
-            if (nextIndex % 300 == 0 && _viewModel.CurrentFrame != null)
-            {
-                var frame = _viewModel.CurrentFrame;
-                System.Diagnostics.Debug.WriteLine($"REPLAY Frame {nextIndex}: Time={frame.Time:F2}s, Speed={frame.Speed:F1}km/h, Gear={frame.Gear}, GPS=({frame.PosX:F6},{frame.PosY:F6})");
-            }
-            
             UpdateDisplay();
-        }
+        }, System.Windows.Threading.DispatcherPriority.Background);
     }
 
     private void UpdatePlayPauseButton()
@@ -1396,10 +1373,10 @@ public partial class MainWindow : Window
             System.Diagnostics.Debug.WriteLine("Clearing buffer and adding frames");
 
             // CRITICAL: Disconnect event handler from mock service to prevent contamination
-            if (_telemetryService is MockTelemetryService mockService)
+            if (_telemetryService is MockTelemetryService)
             {
-                mockService.NewFrameReceived -= OnNewFrame;
-                mockService.Stop();
+                _telemetryService.FrameReceived -= OnNewFrame;
+                _telemetryService.Stop();
                 System.Diagnostics.Debug.WriteLine("Mock service stopped and disconnected");
             }
 
@@ -1433,7 +1410,7 @@ public partial class MainWindow : Window
             _isReplayMode = true;
             _isPaused = true;
             _viewModel.IsLiveMode = false;
-            _replayTimer?.Stop(); // Make sure timer is stopped initially
+            _playbackController.Pause(); // Make sure playback is stopped initially
             _cachedTransformedFrames = null; _boundsCacheFrameCount = -1; _lapTimeCacheFrameCount = -1; _sliderMarkerFrameCount = -1; // Clear cache to force redraw
             _carArrow = null; // Clear car arrow reference
             _timingCache = null;

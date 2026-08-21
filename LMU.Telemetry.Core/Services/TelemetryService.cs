@@ -6,7 +6,7 @@ using LMU.Telemetry.Core.Telemetry;
 namespace LMU.Telemetry.Core.Services
 {
     // Real telemetry service with LMU integration and lap detection
-    public class TelemetryService : IDisposable
+    public class TelemetryService : IDisposable, ITelemetrySource
     {
         private readonly SharedMemoryReader _sharedMemory;
         private readonly TelemetryBuffer _buffer;
@@ -20,6 +20,14 @@ namespace LMU.Telemetry.Core.Services
         public event EventHandler<TelemetryFrame>? NewFrameReceived;
         public event EventHandler<LapInfo>? LapCompleted;
         public event EventHandler<string>? ConnectionStatusChanged;
+
+        // ITelemetrySource conformance - forwards to the concrete NewFrameReceived event
+        // so existing `service.NewFrameReceived += ...` call sites are unaffected.
+        event EventHandler<TelemetryFrame>? ITelemetrySource.FrameReceived
+        {
+            add => NewFrameReceived += value;
+            remove => NewFrameReceived -= value;
+        }
 
         public TelemetryBuffer Buffer => _buffer;
         public bool IsRunning => _isRunning;

@@ -1,11 +1,12 @@
 using System;
 using System.Threading;
 using LMU.Telemetry.Core.Models;
+using LMU.Telemetry.Core.Services;
 using LMU.Telemetry.Core.Telemetry;
 
 namespace LMU.Telemetry.Core.Simulation
 {
-    public class MockTelemetryService : IDisposable
+    public class MockTelemetryService : IDisposable, ITelemetrySource
     {
         private readonly FakeTelemetryGenerator _generator = new();
         private readonly TelemetryBuffer _buffer = new();
@@ -15,6 +16,14 @@ namespace LMU.Telemetry.Core.Simulation
         public event EventHandler<TelemetryFrame>? NewFrameReceived;
         public TelemetryBuffer Buffer => _buffer;
         public bool IsRunning => _isRunning;
+
+        // ITelemetrySource conformance - forwards to the concrete NewFrameReceived event
+        // so existing `service.NewFrameReceived += ...` call sites are unaffected.
+        event EventHandler<TelemetryFrame>? ITelemetrySource.FrameReceived
+        {
+            add => NewFrameReceived += value;
+            remove => NewFrameReceived -= value;
+        }
 
         public MockTelemetryService()
         {
