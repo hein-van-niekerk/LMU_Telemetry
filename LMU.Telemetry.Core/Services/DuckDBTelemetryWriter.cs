@@ -10,9 +10,12 @@ public static class DuckDBTelemetryWriter
 {
     // Write frames to a new .duckdb file using the same schema the reader expects:
     // one table per channel with columns (ts DOUBLE, value DOUBLE/INTEGER),
-    // plus a metadata table with (key VARCHAR, value VARCHAR).
+    // plus a metadata table with (key VARCHAR, value VARCHAR). If a CarSetup is
+    // supplied, it's written into the same file as a car_setup table - the setup
+    // used for a session lives alongside that session's telemetry, for a future
+    // coaching agent to correlate the two.
     public static void Write(string filePath, IReadOnlyList<TelemetryFrame> frames,
-                             string trackName = "", string carName = "")
+                             string trackName = "", string carName = "", CarSetup? setup = null)
     {
         if (frames == null || frames.Count == 0)
             throw new InvalidOperationException("No frames to save.");
@@ -29,6 +32,15 @@ public static class DuckDBTelemetryWriter
         Insert(cmd, "metadata", ("key", "CarName"),   ("value", carName));
         Insert(cmd, "metadata", ("key", "SavedAt"),   ("value", DateTime.UtcNow.ToString("o")));
         Insert(cmd, "metadata", ("key", "FrameCount"),("value", frames.Count.ToString()));
+        if (setup != null)
+        {
+            Insert(cmd, "metadata", ("key", "SetupFileName"), ("value", setup.FileName));
+        }
+
+        if (setup != null)
+        {
+            WriteSetup(cmd, setup);
+        }
 
         // Continuous channels
         CreateDoubleTable(cmd, "World Pos X");
@@ -66,6 +78,27 @@ public static class DuckDBTelemetryWriter
         }
 
         tx.Commit();
+    }
+
+    // car_setup: one row per section/key/value setting from the parsed .svm file,
+    // plus car_setup_raw: the whole original file text as one row (lossless fallback).
+    private static void WriteSetup(DuckDBCommand cmd, CarSetup setup)
+    {
+        cmd.CommandText = "CREATE TABLE car_setup (section VARCHAR, key VARCHAR, value VARCHAR)";
+        cmd.ExecuteNonQuery();
+        foreach (var (sectionName, settings) in setup.Sections)
+        {
+            foreach (var (key, value) in settings)
+            {
+                cmd.CommandText = $"INSERT INTO car_setup VALUES ('{Esc(sectionName)}', '{Esc(key)}', '{Esc(value)}')";
+                cmd.ExecuteNonQuery();
+            }
+        }
+
+        cmd.CommandText = "CREATE TABLE car_setup_raw (content VARCHAR)";
+        cmd.ExecuteNonQuery();
+        cmd.CommandText = $"INSERT INTO car_setup_raw VALUES ('{Esc(setup.RawText)}')";
+        cmd.ExecuteNonQuery();
     }
 
     private static void CreateDoubleTable(DuckDBCommand cmd, string name)

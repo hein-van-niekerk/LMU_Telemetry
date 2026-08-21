@@ -528,4 +528,60 @@ public class DuckDBTelemetryReader
     {
         _telemetryPath = path;
     }
+
+    /// <summary>
+    /// Reads back the CarSetup written alongside a session's telemetry by
+    /// DuckDBTelemetryWriter.Write(..., setup). Returns null if this recording
+    /// has no car_setup table (most won't - attaching a setup is optional).
+    /// </summary>
+    public CarSetup? LoadSetup(string filePath)
+    {
+        using var connection = new DuckDBConnection($"Data Source={filePath};");
+        connection.Open();
+
+        using var checkCmd = connection.CreateCommand();
+        checkCmd.CommandText = "SELECT table_name FROM information_schema.tables WHERE table_schema='main' AND table_name IN ('car_setup', 'car_setup_raw')";
+        using var checkReader = checkCmd.ExecuteReader();
+        var tables = new HashSet<string>();
+        while (checkReader.Read()) tables.Add(checkReader.GetString(0));
+        if (!tables.Contains("car_setup")) return null;
+
+        var sections = new Dictionary<string, Dictionary<string, string>>();
+        using (var cmd = connection.CreateCommand())
+        {
+            cmd.CommandText = "SELECT section, key, value FROM car_setup";
+            using var reader = cmd.ExecuteReader();
+            while (reader.Read())
+            {
+                var section = reader.GetString(0);
+                var key = reader.GetString(1);
+                var value = reader.GetString(2);
+                if (!sections.TryGetValue(section, out var kv))
+                {
+                    kv = new Dictionary<string, string>();
+                    sections[section] = kv;
+                }
+                kv[key] = value;
+            }
+        }
+
+        var rawText = string.Empty;
+        if (tables.Contains("car_setup_raw"))
+        {
+            using var cmd = connection.CreateCommand();
+            cmd.CommandText = "SELECT content FROM car_setup_raw LIMIT 1";
+            using var reader = cmd.ExecuteReader();
+            if (reader.Read()) rawText = reader.GetString(0);
+        }
+
+        var fileName = string.Empty;
+        using (var cmd = connection.CreateCommand())
+        {
+            cmd.CommandText = "SELECT value FROM metadata WHERE key = 'SetupFileName'";
+            using var reader = cmd.ExecuteReader();
+            if (reader.Read()) fileName = reader.GetString(0);
+        }
+
+        return new CarSetup { Sections = sections, RawText = rawText, FileName = fileName };
+    }
 }

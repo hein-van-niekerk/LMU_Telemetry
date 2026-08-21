@@ -1136,12 +1136,40 @@ public partial class MainWindow : Window
         string trackName = frames[0].ExtendedData.TryGetValue("TrackName", out var tn) ? tn?.ToString() ?? "" : "";
         string carName   = frames[0].ExtendedData.TryGetValue("VehicleName", out var cn) ? cn?.ToString() ?? "" : "";
 
+        // Optional: attach the car setup (.svm) used for this session - for the
+        // future coaching agent to correlate setup choices with driving performance.
+        // Same file-browse pattern as loading a telemetry recording.
+        CarSetup? setup = null;
+        var attachSetup = MessageBox.Show(
+            "Attach the car setup (.svm) file used for this session?\n\nOptional - you can save without one.",
+            "Attach Setup File", MessageBoxButton.YesNo, MessageBoxImage.Question);
+        if (attachSetup == MessageBoxResult.Yes)
+        {
+            var setupDlg = new Microsoft.Win32.OpenFileDialog
+            {
+                Title = "Select the car setup file used for this session",
+                Filter = "LMU setup files (*.svm)|*.svm"
+            };
+            if (setupDlg.ShowDialog(this) == true)
+            {
+                try
+                {
+                    setup = SvmSetupReader.Parse(setupDlg.FileName);
+                }
+                catch (Exception ex)
+                {
+                    MessageBox.Show($"Could not parse setup file:\n{ex.Message}\n\nSaving without it.",
+                                   "Setup Parse Failed", MessageBoxButton.OK, MessageBoxImage.Warning);
+                }
+            }
+        }
+
         try
         {
             StatusText.Text = "Saving…";
             StatusText.Foreground = new SolidColorBrush(Colors.Yellow);
 
-            DuckDBTelemetryWriter.Write(dlg.FileName, frames, trackName, carName);
+            DuckDBTelemetryWriter.Write(dlg.FileName, frames, trackName, carName, setup);
 
             StatusText.Text = $"Saved: {System.IO.Path.GetFileName(dlg.FileName)}";
             StatusText.Foreground = new SolidColorBrush(Colors.LimeGreen);
