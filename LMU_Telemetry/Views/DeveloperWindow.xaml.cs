@@ -389,13 +389,21 @@ public partial class DeveloperWindow : Window
         _markerByCorner.Clear();
         if (_currentMap == null || _currentMap.Points.Count < 2) return;
 
+        // ActualWidth/Height can still be stale (0) here if a layout pass hasn't
+        // happened yet since the canvas last resized - force one so ComputeTransform
+        // sees the real size instead of silently computing scale=0 and drawing nothing.
+        MapCanvas.UpdateLayout();
         ComputeTransform();
-        if (_scale <= 0) return;
+        if (_scale <= 0)
+        {
+            CornerCountText.Text = $"Corners: {_currentMap.Corners.Count} (canvas not ready - resize the window to redraw)";
+            return;
+        }
 
         // Centerline
         var polyline = new Polyline
         {
-            Stroke = new SolidColorBrush(Color.FromRgb(90, 90, 90)),
+            Stroke = new SolidColorBrush(Color.FromRgb(180, 180, 190)),
             StrokeThickness = 2
         };
         foreach (var p in _currentMap.Points)
