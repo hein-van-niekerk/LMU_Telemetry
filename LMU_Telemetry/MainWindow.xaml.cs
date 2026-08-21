@@ -10,7 +10,6 @@ using LMU_Telemetry.Rendering;
 using LMU_Telemetry.Models;
 using LMU.Telemetry.Core.Models;
 using LMU.Telemetry.Core.Services;
-using LMU.Telemetry.Core.Simulation;
 using LMU.Telemetry.Core.Telemetry;
 using LMU.Analysis.Engine.Timing;
 using LMU_Telemetry.ViewModels;
@@ -24,19 +23,14 @@ namespace LMU_Telemetry;
 
 public partial class MainWindow : Window
 {
-    private readonly ITelemetrySource _telemetryService;
     private readonly TrackRenderer _trackRenderer;
     private readonly InputRenderer _inputRenderer;
     private readonly MainViewModel _viewModel;
     private readonly DuckDBTelemetryReader _duckDbReader;
     private readonly PlaybackController _playbackController;
-    private bool _useMockData = false;
-    private bool _isUpdating = false;
-    private DateTime _lastRenderTime = DateTime.MinValue;
     private bool _isDragging = false;
     private bool _isInputGraphDragging = false;
     private bool _isPaused = true;
-    private bool _isReplayMode = false;
     private List<TelemetryFrame>? _cachedTransformedFrames = null;
     private double _zoomFactor = 1.0;
     private const double ZoomMin = 0.5;
@@ -110,19 +104,6 @@ public partial class MainWindow : Window
 
         InitializeComponent();
 
-        if (_useMockData)
-        {
-            _telemetryService = new MockTelemetryService();
-        }
-        else
-        {
-            var realService = new TelemetryService();
-            realService.ConnectionStatusChanged += OnConnectionStatusChanged;
-            realService.LapCompleted += OnLapCompleted;
-            _telemetryService = realService;
-        }
-        _telemetryService.FrameReceived += OnNewFrame;
-
         // Replay playback (timer, speed multiplier, pause) - LMU.Telemetry.Core.Telemetry.PlaybackController
         _playbackController = new PlaybackController(_viewModel.Buffer);
         _playbackController.FrameAdvanceRequested += OnPlaybackFrameAdvanceRequested;
@@ -160,26 +141,18 @@ public partial class MainWindow : Window
             {
                 _cachedTransformedFrames = null; _boundsCacheFrameCount = -1;
                 UpdateCanvasZoomTransform();
-                if (_isReplayMode && _viewModel.Buffer.HasData)
+                if (_viewModel.Buffer.HasData)
                 {
                     UpdateDisplay();
                 }
             };
         }
-        
-        // Real service starts polling for rF2 shared memory — no frames until connected
-        if (_telemetryService is TelemetryService realSvc)
-            realSvc.Start();
     }
 
     private void MainWindow_Closed(object? sender, EventArgs e)
     {
         _detailWindow?.ForceClose();
         _playbackController.Dispose();
-        if (_telemetryService is IDisposable disposable)
-        {
-            disposable.Dispose();
-        }
     }
 
     private void OpenDetailWindowButton_Click(object sender, RoutedEventArgs e)
@@ -197,45 +170,24 @@ public partial class MainWindow : Window
         try
         {
             // Check if we have any data to play
-            if (!_isReplayMode && !_viewModel.Buffer.HasData)
+            if (!_viewModel.Buffer.HasData)
             {
                 MessageBox.Show("No telemetry data loaded.\n\nPlease load a recording first using the 'Load Recording' button.",
                                "No Data", MessageBoxButton.OK, MessageBoxImage.Information);
                 return;
             }
-            
-            if (_isReplayMode && !_viewModel.Buffer.HasData)
-            {
-                MessageBox.Show("No replay data loaded.\n\nPlease load a recording first using the 'Load Recording' button.",
-                               "No Data", MessageBoxButton.OK, MessageBoxImage.Information);
-                return;
-            }
-            
+
             _isPaused = !_isPaused;
-            
-            if (_isReplayMode)
+
+            if (_isPaused)
             {
-                // In replay mode, control playback via PlaybackController
-                if (_isPaused)
-                {
-                    _playbackController.Pause();
-                }
-                else
-                {
-                    _playbackController.Play();
-                }
+                _playbackController.Pause();
             }
             else
             {
-                // In live mode, toggle the telemetry service
-                _viewModel.IsLiveMode = !_isPaused;
-                
-                if (!_isPaused)
-                {
-                    _viewModel.ReturnToLiveMode();
-                }
+                _playbackController.Play();
             }
-            
+
             UpdatePlayPauseButton();
             UpdateControlsState();
         }
@@ -338,12 +290,12 @@ public partial class MainWindow : Window
     }
 
     // PlaybackController ticks on a background timer (see LMU.Telemetry.Core.Telemetry.PlaybackController)
-    // and asks us to scrub to nextIndex - marshal to the UI thread, same pattern as OnNewFrame.
+    // and asks us to scrub to nextIndex - marshal to the UI thread.
     private void OnPlaybackFrameAdvanceRequested(object? sender, int nextIndex)
     {
         Dispatcher.BeginInvoke(() =>
         {
-            if (!_isReplayMode || _isPaused || !_viewModel.Buffer.HasData) return;
+            if (_isPaused || !_viewModel.Buffer.HasData) return;
 
             _viewModel.ScrubToIndex(nextIndex);
             UpdateDisplay();
@@ -370,63 +322,7 @@ public partial class MainWindow : Window
 
     private void UpdateControlsState()
     {
-        if (_viewModel.FrameCount % 60 == 0 || _viewModel.FrameCount < 10)
-        {
-            FrameCountText.Text = $"● REC  {_viewModel.FrameCount:N0} frames";
-        }
-    }
-
-    private void OnNewFrame(object? sender, TelemetryFrame frame)
-    {
-        Dispatcher.BeginInvoke(() =>
-        {
-            if (_isUpdating) return;
-            
-            _viewModel.Update(frame);
-            
-            var now = DateTime.UtcNow;
-            if (!_isPaused && !_isDragging && _viewModel.IsLiveMode && (now - _lastRenderTime).TotalMilliseconds > 33)
-            {
-                _isUpdating = true;
-                try
-                {
-                    UpdateDisplay();
-                    _lastRenderTime = now;
-                }
-                finally
-                {
-                    _isUpdating = false;
-                }
-            }
-            
-            UpdateControlsState();
-        }, System.Windows.Threading.DispatcherPriority.Background);
-    }
-
-    private void OnConnectionStatusChanged(object? sender, string status)
-    {
-        Dispatcher.BeginInvoke(() =>
-        {
-            _viewModel.ConnectionStatus = status;
-            StatusText.Text = status;
-
-            bool connected = status.Contains("Connected", StringComparison.OrdinalIgnoreCase)
-                          && !status.Contains("lost", StringComparison.OrdinalIgnoreCase)
-                          && !status.Contains("fail", StringComparison.OrdinalIgnoreCase);
-            var dotColor = connected
-                ? System.Windows.Media.Color.FromRgb(78, 201, 78)
-                : System.Windows.Media.Color.FromRgb(204, 51, 51);
-            ConnectionDotBrush.Color = dotColor;
-            StatusText.Foreground = new System.Windows.Media.SolidColorBrush(dotColor);
-        });
-    }
-
-    private void OnLapCompleted(object? sender, LapInfo lap)
-    {
-        Dispatcher.BeginInvoke(() =>
-        {
-            _viewModel.CurrentLap = lap.LapNumber + 1;
-        });
+        FrameCountText.Text = $"{_viewModel.Buffer.Frames.Count:N0} frames";
     }
 
     private void TrackCanvas_MouseDown(object sender, MouseButtonEventArgs e)
@@ -601,84 +497,58 @@ public partial class MainWindow : Window
         {            
             if (TrackCanvas != null && _viewModel.Buffer.HasData)
             {
-                // In replay mode, cache transformed frames for performance
-                if (_isReplayMode)
+                // Cache transformed frames for performance (post-session analysis only now - no live mode)
+                if (_cachedTransformedFrames == null)
                 {
-                    if (_cachedTransformedFrames == null)
+                    _cachedTransformedFrames = TransformFramesToCanvas(_viewModel.Buffer.Frames);
+
+                    // Initialize lap number to force first draw
+                    if (_viewModel.CurrentFrame != null)
                     {
-                        _cachedTransformedFrames = TransformFramesToCanvas(_viewModel.Buffer.Frames);
-                        
-                        // Initialize lap number to force first draw
-                        if (_viewModel.CurrentFrame != null)
-                        {
-                            _lastLapNumber = _viewModel.CurrentFrame.CurrentLap - 1; // Make it different so first draw triggers
-                        }
-                    }
-                    if (_viewModel.CurrentFrame != null && _cachedTransformedFrames != null)
-                    {
-                        var currentLap = _viewModel.CurrentFrame.CurrentLap;
-                        var currentIndex = _viewModel.Buffer.CurrentIndex;
-                        var currentTime = _viewModel.CurrentFrame.Time;
-                        
-                        // Check if we need to redraw the lap path
-                        if (currentLap != _lastLapNumber)
-                        {
-                            System.Diagnostics.Debug.WriteLine($"LAP CHANGE: {_lastLapNumber} → {currentLap} (frame {currentIndex}, t={currentTime:F2}s)");
-                            
-                            _lastLapNumber = currentLap;
-                            
-                            // ALWAYS clear canvas when lap changes
-                            ClearCanvas();
-                            DrawCenterline();
-                            _carArrow = null; // Reset car arrow reference
-                            
-                            // Draw ONLY the current lap path
-                            _trackRenderer.DrawCompleteLap(TrackCanvas, _cachedTransformedFrames, currentLap);
-                            
-                            // Draw sector and start/finish markers
-                            _trackRenderer.DrawSectorMarkers(TrackCanvas, _cachedTransformedFrames, currentLap);
-                        }
-                        
-                        // Draw the car with heading (remove old arrow first to prevent ghosting)
-                        if (_carArrow != null)
-                        {
-                            TrackCanvas.Children.Remove(_carArrow);
-                            _carArrow = null;
-                        }
-                        
-                        if (_cachedTransformedFrames != null && currentIndex < _cachedTransformedFrames.Count)
-                        {
-                            var transformedCurrent = _cachedTransformedFrames[currentIndex];
-                            TelemetryFrame? transformedPrevious = currentIndex > 0 ? _cachedTransformedFrames[currentIndex - 1] : null;
-                            _carArrow = _trackRenderer.DrawCar(TrackCanvas, transformedCurrent, transformedPrevious);
-                        }
-                        
-                        // Update time slider
-                        UpdateTimeSlider();
+                        _lastLapNumber = _viewModel.CurrentFrame.CurrentLap - 1; // Make it different so first draw triggers
                     }
                 }
-                else
+                if (_viewModel.CurrentFrame != null && _cachedTransformedFrames != null)
                 {
-                    // Live mode - redraw periodically
-                    if (_viewModel.Buffer.Frames.Count % 10 == 0 || !_viewModel.IsLiveMode)
+                    var currentLap = _viewModel.CurrentFrame.CurrentLap;
+                    var currentIndex = _viewModel.Buffer.CurrentIndex;
+                    var currentTime = _viewModel.CurrentFrame.Time;
+
+                    // Check if we need to redraw the lap path
+                    if (currentLap != _lastLapNumber)
                     {
+                        System.Diagnostics.Debug.WriteLine($"LAP CHANGE: {_lastLapNumber} → {currentLap} (frame {currentIndex}, t={currentTime:F2}s)");
+
+                        _lastLapNumber = currentLap;
+
+                        // ALWAYS clear canvas when lap changes
                         ClearCanvas();
                         DrawCenterline();
-                        var transformedFrames = TransformFramesToCanvas(_viewModel.Buffer.Frames);
-                        _trackRenderer.DrawTrack(TrackCanvas, transformedFrames);
-                        
-                        if (_viewModel.CurrentFrame != null)
-                        {
-                            var transformedCurrent = TransformFrameToCanvas(_viewModel.CurrentFrame);
-                            var currentIndex = _viewModel.Buffer.CurrentIndex;
-                            TelemetryFrame? transformedPrevious = null;
-                            if (currentIndex > 0 && transformedFrames.Count > currentIndex - 1)
-                            {
-                                transformedPrevious = transformedFrames[currentIndex - 1];
-                            }
-                            _carArrow = _trackRenderer.DrawCar(TrackCanvas, transformedCurrent, transformedPrevious);
-                        }
+                        _carArrow = null; // Reset car arrow reference
+
+                        // Draw ONLY the current lap path
+                        _trackRenderer.DrawCompleteLap(TrackCanvas, _cachedTransformedFrames, currentLap);
+
+                        // Draw sector and start/finish markers
+                        _trackRenderer.DrawSectorMarkers(TrackCanvas, _cachedTransformedFrames, currentLap);
                     }
+
+                    // Draw the car with heading (remove old arrow first to prevent ghosting)
+                    if (_carArrow != null)
+                    {
+                        TrackCanvas.Children.Remove(_carArrow);
+                        _carArrow = null;
+                    }
+
+                    if (_cachedTransformedFrames != null && currentIndex < _cachedTransformedFrames.Count)
+                    {
+                        var transformedCurrent = _cachedTransformedFrames[currentIndex];
+                        TelemetryFrame? transformedPrevious = currentIndex > 0 ? _cachedTransformedFrames[currentIndex - 1] : null;
+                        _carArrow = _trackRenderer.DrawCar(TrackCanvas, transformedCurrent, transformedPrevious);
+                    }
+
+                    // Update time slider
+                    UpdateTimeSlider();
                 }
             }
 
@@ -1390,14 +1260,6 @@ public partial class MainWindow : Window
 
             System.Diagnostics.Debug.WriteLine("Clearing buffer and adding frames");
 
-            // CRITICAL: Disconnect event handler from mock service to prevent contamination
-            if (_telemetryService is MockTelemetryService)
-            {
-                _telemetryService.FrameReceived -= OnNewFrame;
-                _telemetryService.Stop();
-                System.Diagnostics.Debug.WriteLine("Mock service stopped and disconnected");
-            }
-
             // Clear buffer and load new data (use AddRange to bypass size limit)
             _viewModel.Buffer.Clear();
             _viewModel.Buffer.AddRange(frames);
@@ -1422,12 +1284,9 @@ public partial class MainWindow : Window
                 System.Diagnostics.Debug.WriteLine($"Buffer last: Time={bufLast.Time:F2}s, Speed={bufLast.Speed:F1}km/h, GPS=({bufLast.PosX:F6},{bufLast.PosY:F6})");
             }
 
-            System.Diagnostics.Debug.WriteLine("Setting replay mode");
+            System.Diagnostics.Debug.WriteLine("Loaded recording ready for playback");
 
-            // Set to replay mode
-            _isReplayMode = true;
             _isPaused = true;
-            _viewModel.IsLiveMode = false;
             _playbackController.Pause(); // Make sure playback is stopped initially
             _cachedTransformedFrames = null; _boundsCacheFrameCount = -1; _lapTimeCacheFrameCount = -1; _sliderMarkerFrameCount = -1; // Clear cache to force redraw
             _carArrow = null; // Clear car arrow reference
@@ -1464,6 +1323,7 @@ public partial class MainWindow : Window
             StatusText.Text = $"Loaded: {fileInfo.FileName}";
             StatusText.Foreground = new SolidColorBrush(Colors.LimeGreen);
             LapInfoText.Text = $"{frames.Count} frames • {fileInfo.Duration:mm\\:ss}";
+            UpdateControlsState();
             
             // Store current track name (extract from file or metadata)
             _currentTrackName = fileInfo.TrackName ?? System.IO.Path.GetFileNameWithoutExtension(fileInfo.FileName);

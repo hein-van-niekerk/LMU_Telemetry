@@ -34,14 +34,9 @@
                         <ColumnDefinition Width="Auto"/>
                     </Grid.ColumnDefinitions>
 
-                    <!-- Connection status -->
+                    <!-- Playback status (post-session analysis only - no live capture) -->
                     <StackPanel Grid.Column="0" Orientation="Horizontal" VerticalAlignment="Center">
-                        <Ellipse x:Name="ConnectionDot" Width="8" Height="8" Margin="0,0,7,0">
-                            <Ellipse.Fill>
-                                <SolidColorBrush x:Name="ConnectionDotBrush" Color="#CC3333"/>
-                            </Ellipse.Fill>
-                        </Ellipse>
-                        <TextBlock x:Name="StatusText" Text="NO SIGNAL" Foreground="#CC3333"
+                        <TextBlock x:Name="StatusText" Text="NO DATA" Foreground="#888888"
                                    FontSize="11" FontWeight="Bold" FontFamily="Segoe UI"
                                    VerticalAlignment="Center" MinWidth="110"/>
                         <Border Background="#0E2A0E" BorderBrush="#1A4A1A" BorderThickness="1"
@@ -52,7 +47,7 @@
                                         <SolidColorBrush x:Name="RecordDotBrush" Color="#4EC94E"/>
                                     </Ellipse.Fill>
                                 </Ellipse>
-                                <TextBlock x:Name="FrameCountText" Text="REC  0 frames"
+                                <TextBlock x:Name="FrameCountText" Text="0 frames"
                                            Foreground="#4EC94E" FontSize="10" FontWeight="Bold"
                                            FontFamily="Consolas" VerticalAlignment="Center"/>
                             </StackPanel>
