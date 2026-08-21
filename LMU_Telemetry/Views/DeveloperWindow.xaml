@@ -78,22 +78,18 @@
                         <Button x:Name="LoadButton" Content="Load .duckdb File..." Click="LoadButton_Click"/>
                         <TextBlock x:Name="LoadedFileText" Text="No file loaded" TextWrapping="Wrap" Margin="0,0,0,12"/>
 
-                        <TextBlock Text="2. GENERATE MAP" FontWeight="Bold" Foreground="#CCCCCC" Margin="0,0,0,4"/>
-                        <Button x:Name="GenerateButton" Content="Generate Track Map" Click="GenerateButton_Click" IsEnabled="False"/>
+                        <TextBlock Text="2. SHOW RAW DRIVEN PATH" FontWeight="Bold" Foreground="#CCCCCC" Margin="0,0,0,4"/>
+                        <TextBlock Text="No automatic map generation - this is the raw recorded line, rendered the same way as the main window. Drive both track-limit edges and pick the lap that looks cleanest." TextWrapping="Wrap" Margin="0,0,0,6"/>
+                        <TextBlock Text="Lap:"/>
+                        <ComboBox x:Name="LapSelector" IsEnabled="False" SelectionChanged="LapSelector_SelectionChanged" Margin="0,0,0,6"/>
                         <TextBlock x:Name="MapInfoText" Text="" TextWrapping="Wrap" Margin="0,0,0,12"/>
 
-                        <TextBlock Text="3. CORNER DETECTION" FontWeight="Bold" Foreground="#CCCCCC" Margin="0,0,0,4"/>
-                        <TextBlock x:Name="ThresholdLabel" Text="Curvature threshold: 0.0050"/>
-                        <Slider x:Name="ThresholdSlider" Minimum="0.001" Maximum="0.03" Value="0.005"
-                                TickFrequency="0.001" IsSnapToTickEnabled="False"
-                                ValueChanged="ThresholdSlider_ValueChanged" IsEnabled="False" Margin="0,0,0,4"/>
-                        <TextBlock x:Name="CornerCountText" Text="Corners: 0" Margin="0,0,0,12"/>
-
-                        <TextBlock Text="4. EDIT CORNERS" FontWeight="Bold" Foreground="#CCCCCC" Margin="0,0,0,4"/>
-                        <TextBlock Text="Click a marker to select. Drag to move. Toggle Add mode then click empty track to add." TextWrapping="Wrap" Margin="0,0,0,6"/>
+                        <TextBlock Text="3. PLACE CORNERS" FontWeight="Bold" Foreground="#CCCCCC" Margin="0,0,0,4"/>
+                        <TextBlock Text="Click a marker to select. Drag to move. Toggle Add mode then click the track line to add - all corners are placed by hand, nothing is auto-detected." TextWrapping="Wrap" Margin="0,0,0,6"/>
                         <ToggleButton x:Name="AddCornerToggle" Content="Add Corner Mode: OFF"
                                       Checked="AddCornerToggle_Checked" Unchecked="AddCornerToggle_Unchecked"
-                                      Margin="0,0,0,10" Padding="8,5" IsEnabled="False"/>
+                                      Margin="0,0,0,6" Padding="8,5" IsEnabled="False"/>
+                        <TextBlock x:Name="CornerCountText" Text="Corners: 0" Margin="0,0,0,12"/>
 
                         <Border x:Name="SelectedCornerPanel" BorderBrush="#2A2A2A" BorderThickness="1" Padding="8" Margin="0,0,0,12"
                                 Visibility="Collapsed">
@@ -106,7 +102,7 @@
                             </StackPanel>
                         </Border>
 
-                        <TextBlock Text="5. SAVE" FontWeight="Bold" Foreground="#CCCCCC" Margin="0,0,0,4"/>
+                        <TextBlock Text="4. SAVE" FontWeight="Bold" Foreground="#CCCCCC" Margin="0,0,0,4"/>
                         <TextBlock Text="Track name:"/>
                         <TextBox x:Name="TrackNameBox"/>
                         <Button x:Name="SaveButton" Content="Save Track Map" Click="SaveButton_Click" IsEnabled="False"/>

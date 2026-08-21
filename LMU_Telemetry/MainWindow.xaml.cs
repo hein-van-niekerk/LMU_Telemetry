@@ -628,58 +628,28 @@ public partial class MainWindow : Window
                 };
             }).ToList();
         }
-        // Fallback: Auto-fit (no track map or centerline built yet)
+        // Fallback: Auto-fit (no track map or centerline built yet) - shared with
+        // Developer Mode via TrackRenderer.AutoFitTransform so both render identically.
+        var autoFitted = TrackRenderer.AutoFitTransform(frames, canvasWidth, canvasHeight);
 
-        // Rotate by 80 degrees clockwise
-        const double rotationRadians = (Math.PI / 2.0) - (10.0 * Math.PI / 180.0);
-        var cosTheta = Math.Cos(rotationRadians);
-        var sinTheta = Math.Sin(rotationRadians);
-        
-        var rotatedFrames = frames.Select(f => {
-            var x = f.PosX;
-            var y = f.PosY;
-            return (
-                PosX: (float)(x * cosTheta - y * sinTheta),
-                PosY: (float)(x * sinTheta + y * cosTheta),
-                Frame: f
-            );
-        }).ToList();
-
-        var fallbackMinX = rotatedFrames.Min(f => f.PosX);
-        var fallbackMaxX = rotatedFrames.Max(f => f.PosX);
-        var fallbackMinY = rotatedFrames.Min(f => f.PosY);
-        var fallbackMaxY = rotatedFrames.Max(f => f.PosY);
-
-        if (fallbackMaxX == fallbackMinX) fallbackMaxX = fallbackMinX + 1;
-        if (fallbackMaxY == fallbackMinY) fallbackMaxY = fallbackMinY + 1;
-
-        var fallbackScaleX = canvasWidth / (fallbackMaxX - fallbackMinX);
-        var fallbackScaleY = canvasHeight / (fallbackMaxY - fallbackMinY);
-        var fallbackScale = Math.Min(fallbackScaleX, fallbackScaleY) * 0.9;
-
-        var fallbackOffsetX = (canvasWidth - (fallbackMaxX - fallbackMinX) * fallbackScale) / 2;
-        var fallbackOffsetY = (canvasHeight - (fallbackMaxY - fallbackMinY) * fallbackScale) / 2;
-
-        return rotatedFrames.Select(rf => {
-            var rawX = fallbackOffsetX + (rf.PosX - fallbackMinX) * fallbackScale;
-            var rawY = fallbackOffsetY + (fallbackMaxY - rf.PosY) * fallbackScale;
-            var zoomed = ApplyZoom(rawX, rawY, canvasWidth, canvasHeight);
-
+        return autoFitted.Select(f =>
+        {
+            var zoomed = ApplyZoom(f.PosX, f.PosY, canvasWidth, canvasHeight);
             return new TelemetryFrame
             {
-                Time = rf.Frame.Time,
+                Time = f.Time,
                 PosX = (float)zoomed.X,
                 PosY = (float)zoomed.Y,
-                Speed = rf.Frame.Speed,
-                Throttle = rf.Frame.Throttle,
-                Brake = rf.Frame.Brake,
-                Steering = rf.Frame.Steering,
-                Gear = rf.Frame.Gear,
-                Rpm = rf.Frame.Rpm,
-                CurrentLap = rf.Frame.CurrentLap,
-                LapDistance = rf.Frame.LapDistance,
-                LapTime = rf.Frame.LapTime,
-                Sector = rf.Frame.Sector
+                Speed = f.Speed,
+                Throttle = f.Throttle,
+                Brake = f.Brake,
+                Steering = f.Steering,
+                Gear = f.Gear,
+                Rpm = f.Rpm,
+                CurrentLap = f.CurrentLap,
+                LapDistance = f.LapDistance,
+                LapTime = f.LapTime,
+                Sector = f.Sector
             };
         }).ToList();
     }
@@ -1704,10 +1674,13 @@ public partial class MainWindow : Window
             {
                 System.Diagnostics.Debug.WriteLine($"No track map found for '{_currentTrackName}'");
                 Log($"No pre-generated track map found for '{_currentTrackName}'");
-                Log("Use 'Generate Track Map' button to create one");
-                
-                // Show Generate, hide Delete
-                GenerateTrackMapButton.Visibility = Visibility.Visible;
+                Log("Use Developer Mode (Ctrl+Shift+D) to build one by hand");
+
+                // GenerateTrackMapButton stays Collapsed - it runs the same automatic
+                // averaging/smoothing pipeline that's now considered unreliable and was
+                // dropped from Developer Mode in favor of hand-placed corners on the raw
+                // driven path. Leaving this button live would let it silently overwrite a
+                // hand-curated map with the broken auto-generated one.
                 DeleteTrackMapButton.Visibility = Visibility.Collapsed;
                 return false;
             }
@@ -1716,9 +1689,7 @@ public partial class MainWindow : Window
         {
             Log($"ERROR loading track map: {ex.Message}");
             _generatedTrackMap = null;
-            
-            // Show Generate, hide Delete
-            GenerateTrackMapButton.Visibility = Visibility.Visible;
+
             DeleteTrackMapButton.Visibility = Visibility.Collapsed;
             return false;
         }
@@ -1955,11 +1926,11 @@ public partial class MainWindow : Window
             _generatedTrackMap = null;
             _cachedTransformedFrames = null; _boundsCacheFrameCount = -1;
             
-            // Update button visibility
-            GenerateTrackMapButton.Visibility = Visibility.Visible;
+            // GenerateTrackMapButton stays Collapsed - see LoadTrackMapIfExists for why.
             DeleteTrackMapButton.Visibility = Visibility.Collapsed;
-            
+
             Log($"✓ Track map deleted successfully");
+            Log("Use Developer Mode (Ctrl+Shift+D) to build a new one by hand");
             
             StatusText.Text = "Track map deleted";
             StatusText.Foreground = new SolidColorBrush(Colors.Orange);

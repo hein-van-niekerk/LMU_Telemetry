@@ -12,6 +12,71 @@ namespace LMU_Telemetry.Rendering
 {
     public class TrackRenderer
     {
+        // Auto-fit transform used whenever there's no calibrated track centerline:
+        // rotate to a fixed visual orientation, scale/center to fill the canvas, flip Y
+        // for screen coordinates. Shared by MainWindow and Developer Mode so both render
+        // a recording's raw driven path identically - same math, one place to fix bugs.
+        public static List<TelemetryFrame> AutoFitTransform(IReadOnlyList<TelemetryFrame> frames, double canvasWidth, double canvasHeight)
+        {
+            if (frames.Count == 0 || canvasWidth <= 0 || canvasHeight <= 0)
+                return new List<TelemetryFrame>();
+
+            // Rotate by 80 degrees clockwise (arbitrary fixed orientation, matches the
+            // original main-window fallback view)
+            const double rotationRadians = (Math.PI / 2.0) - (10.0 * Math.PI / 180.0);
+            var cosTheta = Math.Cos(rotationRadians);
+            var sinTheta = Math.Sin(rotationRadians);
+
+            var rotatedFrames = frames.Select(f =>
+            {
+                var x = f.PosX;
+                var y = f.PosY;
+                return (
+                    PosX: (float)(x * cosTheta - y * sinTheta),
+                    PosY: (float)(x * sinTheta + y * cosTheta),
+                    Frame: f
+                );
+            }).ToList();
+
+            var minX = rotatedFrames.Min(f => f.PosX);
+            var maxX = rotatedFrames.Max(f => f.PosX);
+            var minY = rotatedFrames.Min(f => f.PosY);
+            var maxY = rotatedFrames.Max(f => f.PosY);
+
+            if (maxX == minX) maxX = minX + 1;
+            if (maxY == minY) maxY = minY + 1;
+
+            var scaleX = canvasWidth / (maxX - minX);
+            var scaleY = canvasHeight / (maxY - minY);
+            var scale = Math.Min(scaleX, scaleY) * 0.9;
+
+            var offsetX = (canvasWidth - (maxX - minX) * scale) / 2;
+            var offsetY = (canvasHeight - (maxY - minY) * scale) / 2;
+
+            return rotatedFrames.Select(rf =>
+            {
+                var x = offsetX + (rf.PosX - minX) * scale;
+                var y = offsetY + (maxY - rf.PosY) * scale; // flip Y for screen coordinates
+
+                return new TelemetryFrame
+                {
+                    Time = rf.Frame.Time,
+                    PosX = (float)x,
+                    PosY = (float)y,
+                    Speed = rf.Frame.Speed,
+                    Throttle = rf.Frame.Throttle,
+                    Brake = rf.Frame.Brake,
+                    Steering = rf.Frame.Steering,
+                    Gear = rf.Frame.Gear,
+                    Rpm = rf.Frame.Rpm,
+                    CurrentLap = rf.Frame.CurrentLap,
+                    LapDistance = rf.Frame.LapDistance,
+                    LapTime = rf.Frame.LapTime,
+                    Sector = rf.Frame.Sector
+                };
+            }).ToList();
+        }
+
         // Draw the complete track outline for live mode (all accumulated frames)
         public void DrawTrack(Canvas canvas, IReadOnlyList<TelemetryFrame> frames)
         {

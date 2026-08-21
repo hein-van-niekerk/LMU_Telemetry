@@ -9,6 +9,7 @@ using System.Windows.Shapes;
 using LMU.Telemetry.Core.Models;
 using LMU.Telemetry.Core.Services;
 using LMU_Telemetry.Models;
+using LMU_Telemetry.Rendering;
 using Point = System.Windows.Point;
 using Color = System.Windows.Media.Color;
 using Brushes = System.Windows.Media.Brushes;
@@ -17,24 +18,27 @@ using FontFamily = System.Windows.Media.FontFamily;
 namespace LMU_Telemetry.Views;
 
 /// <summary>
-/// Developer Mode: generate track maps from a chosen .duckdb recording, hand-curate
-/// corner positions/names, and save the result. Accuracy-over-automation companion
-/// to the automatic curvature-peak detector - opened via Ctrl+Shift+D in MainWindow.
+/// Developer Mode: load a .duckdb recording, look at the RAW driven path for a chosen
+/// lap (rendered the same way MainWindow renders it - TrackRenderer.AutoFitTransform +
+/// TrackRenderer.DrawTrack, no statistical averaging/smoothing/curvature generation),
+/// and hand-place/name corners directly on that real line. Accuracy-over-automation:
+/// nothing here is auto-detected - opened via Ctrl+Shift+D in MainWindow.
 /// </summary>
 public partial class DeveloperWindow : Window
 {
     private List<TelemetryFrame>? _loadedFrames;
-    private GeneratedTrackMap? _currentMap;
+    private List<TelemetryFrame> _currentLapFrames = new(); // raw, world-space
+    private GeneratedTrackMap? _currentMap;                  // Points = raw lap positions (no curvature)
     private double[] _cumulativeDistance = Array.Empty<double>();
+
+    // Canvas-space copy of _currentMap.Points (same index correspondence), rebuilt each
+    // draw - lets hit-testing work directly in screen space like MainWindow's drag-to-scrub,
+    // with no inverse-transform math needed.
+    private List<TelemetryFrame> _canvasFrames = new();
 
     private Corner? _selectedCorner;
     private bool _isDraggingCorner;
     private bool _addCornerMode;
-
-    // World-space bounds -> canvas transform, recomputed whenever the map or canvas size changes.
-    private double _minX, _maxX, _minY, _maxY, _scale, _offsetX, _offsetY;
-
-    private readonly Dictionary<Corner, Ellipse> _markerByCorner = new();
 
     public DeveloperWindow()
     {
@@ -82,7 +86,29 @@ public partial class DeveloperWindow : Window
                 .FirstOrDefault(r => string.Equals(r.FilePath, dlg.FileName, StringComparison.OrdinalIgnoreCase));
             TrackNameBox.Text = info?.TrackName is { Length: > 0 } tn && tn != "Unknown Track" ? tn : "";
 
-            GenerateButton.IsEnabled = true;
+            // Populate the lap selector - same >100-frame filter the old generator used,
+            // so partial/aborted laps don't clutter the list.
+            var laps = frames
+                .GroupBy(f => f.CurrentLap)
+                .Where(g => g.Count() > 100)
+                .OrderBy(g => g.Key)
+                .ToList();
+
+            LapSelector.ItemsSource = laps.Select(g => $"Lap {g.Key}  ({g.Count()} frames)").ToList();
+            LapSelector.Tag = laps.Select(g => g.ToList()).ToList(); // stash the actual frame lists
+            LapSelector.IsEnabled = laps.Count > 0;
+            AddCornerToggle.IsEnabled = false;
+            SaveButton.IsEnabled = false;
+
+            if (laps.Count > 0)
+            {
+                LapSelector.SelectedIndex = 0; // triggers SelectionChanged -> draws the lap
+            }
+            else
+            {
+                MapInfoText.Text = "No laps with enough frames (>100) to show.";
+            }
+
             StatusText.Text = "Loaded";
             StatusText.Foreground = new SolidColorBrush(Colors.LimeGreen);
         }
@@ -93,55 +119,58 @@ public partial class DeveloperWindow : Window
         }
     }
 
-    // --- 2. Generate --------------------------------------------------------
+    // --- 2. Show raw driven path for the selected lap ------------------------
 
-    private void GenerateButton_Click(object sender, RoutedEventArgs e)
+    private void LapSelector_SelectionChanged(object sender, SelectionChangedEventArgs e)
     {
-        if (_loadedFrames == null) return;
+        if (LapSelector.SelectedIndex < 0 || LapSelector.Tag is not List<List<TelemetryFrame>> lapFrameLists) return;
+        if (LapSelector.SelectedIndex >= lapFrameLists.Count) return;
 
-        try
+        _currentLapFrames = lapFrameLists[LapSelector.SelectedIndex];
+
+        // Preserve corners across a lap switch by keeping the existing list if one
+        // exists - corners are named track features, not tied to which lap you're
+        // looking at right now.
+        var existingCorners = _currentMap?.Corners ?? new List<Corner>();
+
+        _currentMap = new GeneratedTrackMap
         {
-            var laps = _loadedFrames
-                .GroupBy(f => f.CurrentLap)
-                .OrderBy(g => g.Key)
-                .Select(g => g.ToList())
-                .ToList();
+            Points = _currentLapFrames.Select(f => new TrackPoint
+            {
+                Position = new Point(f.PosX, f.PosY),
+                Heading = 0,
+                Curvature = 0
+            }).ToList(),
+            Corners = existingCorners,
+            GeneratedFromLapCount = 1,
+            TotalLength = 0,
+            GeneratedDateTime = DateTime.Now
+        };
+        _currentMap.TotalLength = CalculateRawLength(_currentMap.Points);
 
-            _currentMap = TrackMapGenerator.Generate(laps);
-            RebuildCumulativeDistances();
-            RenumberCorners();
-
-            MapInfoText.Text = $"{_currentMap.Points.Count} points, {_currentMap.TotalLength:F0}m, from {_currentMap.GeneratedFromLapCount} laps";
-            ThresholdSlider.IsEnabled = true;
-            AddCornerToggle.IsEnabled = true;
-            SaveButton.IsEnabled = true;
-            ClearSelection();
-            DrawTrackMap();
-
-            StatusText.Text = "Map generated";
-            StatusText.Foreground = new SolidColorBrush(Colors.LimeGreen);
-        }
-        catch (Exception ex)
-        {
-            StatusText.Text = $"Generate failed: {ex.Message}";
-            StatusText.Foreground = new SolidColorBrush(Colors.OrangeRed);
-        }
-    }
-
-    // --- 3. Corner detection threshold --------------------------------------
-
-    private void ThresholdSlider_ValueChanged(object sender, RoutedPropertyChangedEventArgs<double> e)
-    {
-        ThresholdLabel.Text = $"Curvature threshold: {ThresholdSlider.Value:F4}";
-        if (_currentMap == null) return;
-
-        _currentMap.Corners = TrackMapGenerator.DetectCorners(_currentMap.Points, ThresholdSlider.Value, minDistance: 20);
+        RebuildCumulativeDistances();
         RenumberCorners();
+
+        MapInfoText.Text = $"{_currentMap.Points.Count} raw points, {_currentMap.TotalLength:F0}m - unmodified, no smoothing/averaging";
+        AddCornerToggle.IsEnabled = true;
+        SaveButton.IsEnabled = true;
         ClearSelection();
         DrawTrackMap();
     }
 
-    // --- 4. Edit corners -----------------------------------------------------
+    private static double CalculateRawLength(List<TrackPoint> points)
+    {
+        double total = 0;
+        for (int i = 1; i < points.Count; i++)
+        {
+            var dx = points[i].Position.X - points[i - 1].Position.X;
+            var dy = points[i].Position.Y - points[i - 1].Position.Y;
+            total += Math.Sqrt(dx * dx + dy * dy);
+        }
+        return total;
+    }
+
+    // --- 3. Edit corners -----------------------------------------------------
 
     private void AddCornerToggle_Checked(object sender, RoutedEventArgs e)
     {
@@ -171,13 +200,13 @@ public partial class DeveloperWindow : Window
 
         if (_addCornerMode)
         {
-            var (nearestIdx, worldPos) = FindNearestTrackPoint(clickPos);
-            if (nearestIdx < 0) return;
+            var idx = FindNearestCanvasPointIndex(clickPos);
+            if (idx < 0) return;
 
             var newCorner = new Corner
             {
-                Position = worldPos,
-                Curvature = _currentMap.Points[nearestIdx].Curvature,
+                Position = _currentMap.Points[idx].Position, // world-space, from the raw lap
+                Curvature = 0,
                 Name = null
             };
             _currentMap.Corners.Add(newCorner);
@@ -191,11 +220,10 @@ public partial class DeveloperWindow : Window
     {
         if (!_isDraggingCorner || _selectedCorner == null || _currentMap == null) return;
 
-        var (nearestIdx, worldPos) = FindNearestTrackPoint(e.GetPosition(MapCanvas));
-        if (nearestIdx < 0) return;
+        var idx = FindNearestCanvasPointIndex(e.GetPosition(MapCanvas));
+        if (idx < 0) return;
 
-        _selectedCorner.Position = worldPos;
-        _selectedCorner.Curvature = _currentMap.Points[nearestIdx].Curvature;
+        _selectedCorner.Position = _currentMap.Points[idx].Position;
         RenumberCorners();
         DrawTrackMap();
         UpdateSelectedCornerDetail();
@@ -217,20 +245,19 @@ public partial class DeveloperWindow : Window
         SelectedCornerHeader.Text = $"Selected: Corner #{corner.Number}";
         CornerNameBox.Text = corner.Name ?? "";
         UpdateSelectedCornerDetail();
-        HighlightSelectedMarker();
+        DrawTrackMap();
     }
 
     private void ClearSelection()
     {
         _selectedCorner = null;
         SelectedCornerPanel.Visibility = Visibility.Collapsed;
-        HighlightSelectedMarker();
     }
 
     private void UpdateSelectedCornerDetail()
     {
         if (_selectedCorner == null) return;
-        SelectedCornerDetail.Text = $"curvature={_selectedCorner.Curvature:F5}   pos=({_selectedCorner.Position.X:F1}, {_selectedCorner.Position.Y:F1})";
+        SelectedCornerDetail.Text = $"pos=({_selectedCorner.Position.X:F1}, {_selectedCorner.Position.Y:F1})";
     }
 
     private void CornerNameBox_TextChanged(object sender, TextChangedEventArgs e)
@@ -249,7 +276,7 @@ public partial class DeveloperWindow : Window
         DrawTrackMap();
     }
 
-    // --- 5. Save --------------------------------------------------------------
+    // --- 4. Save --------------------------------------------------------------
 
     private void SaveButton_Click(object sender, RoutedEventArgs e)
     {
@@ -294,16 +321,14 @@ public partial class DeveloperWindow : Window
 
     /// <summary>
     /// Renumbers corners sequentially by lap position and recomputes each corner's
-    /// LapDistance as the segment distance from the previous corner - matching the
-    /// shape CornerDetector.DetectCorners already produces, so hand-added/moved/
-    /// deleted corners stay consistent with detector output.
+    /// LapDistance as the segment distance from the previous corner.
     /// </summary>
     private void RenumberCorners()
     {
         if (_currentMap == null || _currentMap.Points.Count == 0) return;
 
         var ordered = _currentMap.Corners
-            .Select(c => (Corner: c, Index: FindNearestPointIndex(c.Position)))
+            .Select(c => (Corner: c, Index: FindNearestWorldPointIndex(c.Position)))
             .OrderBy(t => t.Index)
             .ToList();
 
@@ -320,7 +345,7 @@ public partial class DeveloperWindow : Window
         _currentMap.Corners = ordered.Select(t => t.Corner).ToList();
     }
 
-    private int FindNearestPointIndex(Point worldPos)
+    private int FindNearestWorldPointIndex(Point worldPos)
     {
         if (_currentMap == null) return -1;
         int best = -1;
@@ -336,86 +361,53 @@ public partial class DeveloperWindow : Window
         return best;
     }
 
-    private (int index, Point worldPos) FindNearestTrackPoint(Point canvasPos)
+    // Nearest point search directly in canvas/screen space, against the same
+    // transformed frames that were actually drawn - avoids needing to invert
+    // TrackRenderer.AutoFitTransform's rotate+scale+offset math.
+    private int FindNearestCanvasPointIndex(Point canvasPos)
     {
-        if (_currentMap == null) return (-1, default);
-        var worldClick = CanvasToWorld(canvasPos);
-        int idx = FindNearestPointIndex(worldClick);
-        return idx < 0 ? (-1, default) : (idx, _currentMap.Points[idx].Position);
+        int best = -1;
+        double bestDistSq = double.MaxValue;
+        for (int i = 0; i < _canvasFrames.Count; i++)
+        {
+            var dx = _canvasFrames[i].PosX - canvasPos.X;
+            var dy = _canvasFrames[i].PosY - canvasPos.Y;
+            var d = dx * dx + dy * dy;
+            if (d < bestDistSq) { bestDistSq = d; best = i; }
+        }
+        return best;
     }
 
-    // --- Canvas transform + drawing ---------------------------------------------
-
-    private void ComputeTransform()
-    {
-        if (_currentMap == null || _currentMap.Points.Count == 0) return;
-
-        var canvasWidth = MapCanvas.ActualWidth;
-        var canvasHeight = MapCanvas.ActualHeight;
-        if (canvasWidth <= 0 || canvasHeight <= 0) return;
-
-        var points = _currentMap.Points;
-        _minX = points.Min(p => p.Position.X);
-        _maxX = points.Max(p => p.Position.X);
-        _minY = points.Min(p => p.Position.Y);
-        _maxY = points.Max(p => p.Position.Y);
-
-        var rangeX = Math.Max(1, _maxX - _minX);
-        var rangeY = Math.Max(1, _maxY - _minY);
-
-        _scale = Math.Min(canvasWidth / rangeX, canvasHeight / rangeY) * 0.85;
-        _offsetX = (canvasWidth - rangeX * _scale) / 2;
-        _offsetY = (canvasHeight - rangeY * _scale) / 2;
-    }
-
-    private Point WorldToCanvas(Point world)
-    {
-        var x = _offsetX + (world.X - _minX) * _scale;
-        var y = _offsetY + (_maxY - world.Y) * _scale; // flip Y for screen coordinates
-        return new Point(x, y);
-    }
-
-    private Point CanvasToWorld(Point canvas)
-    {
-        if (_scale <= 0) return default;
-        var x = (canvas.X - _offsetX) / _scale + _minX;
-        var y = _maxY - (canvas.Y - _offsetY) / _scale;
-        return new Point(x, y);
-    }
+    // --- Drawing ---------------------------------------------------------------
 
     private void DrawTrackMap()
     {
         MapCanvas.Children.Clear();
-        _markerByCorner.Clear();
-        if (_currentMap == null || _currentMap.Points.Count < 2) return;
+        _canvasFrames = new List<TelemetryFrame>();
+        if (_currentMap == null || _currentLapFrames.Count < 2) return;
 
-        // ActualWidth/Height can still be stale (0) here if a layout pass hasn't
-        // happened yet since the canvas last resized - force one so ComputeTransform
-        // sees the real size instead of silently computing scale=0 and drawing nothing.
+        // Force a layout pass so ActualWidth/Height are current - see the fix in an
+        // earlier commit for why this matters (canvas size can read stale/0 otherwise).
         MapCanvas.UpdateLayout();
-        ComputeTransform();
-        if (_scale <= 0)
+        var canvasWidth = MapCanvas.ActualWidth;
+        var canvasHeight = MapCanvas.ActualHeight;
+        if (canvasWidth <= 0 || canvasHeight <= 0)
         {
             CornerCountText.Text = $"Corners: {_currentMap.Corners.Count} (canvas not ready - resize the window to redraw)";
             return;
         }
 
-        // Centerline
-        var polyline = new Polyline
-        {
-            Stroke = new SolidColorBrush(Color.FromRgb(180, 180, 190)),
-            StrokeThickness = 2
-        };
-        foreach (var p in _currentMap.Points)
-        {
-            polyline.Points.Add(WorldToCanvas(p.Position));
-        }
-        MapCanvas.Children.Add(polyline);
+        // Same transform + same renderer MainWindow uses for the raw driven path.
+        _canvasFrames = TrackRenderer.AutoFitTransform(_currentLapFrames, canvasWidth, canvasHeight);
+        _trackRenderer.DrawTrack(MapCanvas, _canvasFrames);
 
-        // Corner markers
+        // Corner markers - _currentMap.Points and _canvasFrames share index
+        // correspondence (both built from _currentLapFrames in the same order).
         foreach (var corner in _currentMap.Corners)
         {
-            var canvasPos = WorldToCanvas(corner.Position);
+            var idx = FindNearestWorldPointIndex(corner.Position);
+            if (idx < 0 || idx >= _canvasFrames.Count) continue;
+            var canvasPos = new Point(_canvasFrames[idx].PosX, _canvasFrames[idx].PosY);
             bool selected = corner == _selectedCorner;
 
             var marker = new Ellipse
@@ -431,7 +423,6 @@ public partial class DeveloperWindow : Window
             Canvas.SetLeft(marker, canvasPos.X - marker.Width / 2);
             Canvas.SetTop(marker, canvasPos.Y - marker.Height / 2);
             MapCanvas.Children.Add(marker);
-            _markerByCorner[corner] = marker;
 
             var label = new TextBlock
             {
@@ -449,5 +440,5 @@ public partial class DeveloperWindow : Window
         CornerCountText.Text = $"Corners: {_currentMap.Corners.Count}";
     }
 
-    private void HighlightSelectedMarker() => DrawTrackMap();
+    private readonly TrackRenderer _trackRenderer = new();
 }
