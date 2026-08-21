@@ -54,9 +54,7 @@ public class TrackMapGenerator
         System.Diagnostics.Debug.WriteLine($"Generated track map with {trackPoints.Count} points");
         
         // Step 7: Detect corners from curvature
-        // Disabled: corner numbers were not working correctly
-        // var corners = DetectCorners(trackPoints);
-        var corners = new List<Corner>();
+        var corners = DetectCorners(trackPoints);
         
         return new GeneratedTrackMap
         {
@@ -323,8 +321,10 @@ public class TrackMapGenerator
     /// <summary>
     /// Detect corners from track points based on curvature peaks.
     /// Delegates to LMU.Analysis.Engine, converting at the WPF Point boundary.
+    /// Public + parameterized so Developer Mode can re-run detection at a chosen
+    /// threshold without regenerating the whole centerline from laps.
     /// </summary>
-    private static List<Corner> DetectCorners(List<TrackPoint> trackPoints)
+    public static List<Corner> DetectCorners(List<TrackPoint> trackPoints, double curvatureThreshold = 0.005, int minDistance = 20)
     {
         var curvaturePoints = trackPoints.Select(tp => new CurvaturePoint
         {
@@ -333,7 +333,7 @@ public class TrackMapGenerator
             Curvature = tp.Curvature
         }).ToList();
 
-        var detectedCorners = CornerDetector.DetectCorners(curvaturePoints);
+        var detectedCorners = CornerDetector.DetectCorners(curvaturePoints, curvatureThreshold, minDistance);
 
         return detectedCorners.Select(dc => new Corner
         {
@@ -385,4 +385,10 @@ public class Corner
     public Point Position { get; set; }
     public double Curvature { get; set; }
     public double LapDistance { get; set; }
+
+    /// <summary>
+    /// Real-world corner name (e.g. "Pouhon"), assigned manually via Developer Mode.
+    /// Null/empty until curated - the detector only ever produces numbers.
+    /// </summary>
+    public string? Name { get; set; }
 }

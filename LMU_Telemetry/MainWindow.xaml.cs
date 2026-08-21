@@ -129,6 +129,24 @@ public partial class MainWindow : Window
 
         Loaded += MainWindow_Loaded;
         Closed += MainWindow_Closed;
+        PreviewKeyDown += MainWindow_PreviewKeyDown;
+    }
+
+    // Ctrl+Shift+D opens Developer Mode (track map generation + corner curation).
+    // Deliberately not a visible menu item - a dev tool, not a user-facing feature.
+    private DeveloperWindow? _developerWindow;
+    private void MainWindow_PreviewKeyDown(object sender, System.Windows.Input.KeyEventArgs e)
+    {
+        if (e.Key == Key.D && Keyboard.Modifiers == (ModifierKeys.Control | ModifierKeys.Shift))
+        {
+            if (_developerWindow == null || !_developerWindow.IsLoaded)
+            {
+                _developerWindow = new DeveloperWindow { Owner = this };
+            }
+            _developerWindow.Show();
+            _developerWindow.Activate();
+            e.Handled = true;
+        }
     }
 
     private void MainWindow_Loaded(object sender, RoutedEventArgs e)
@@ -1593,11 +1611,10 @@ public partial class MainWindow : Window
             TrackCanvas.Children.Insert(1, trackPolyline);
             
             // Draw corner numbers if available
-            // Disabled: corner numbers were not working correctly
-            // if (_generatedTrackMap.Corners.Count > 0)
-            // {
-            //     DrawCornerLabels(rotatedTrack, minX, minY, rangeX, rangeY, scale, offsetX, offsetY, maxY);
-            // }
+            if (_generatedTrackMap.Corners.Count > 0)
+            {
+                DrawCornerLabels(rotatedTrack, minX, minY, rangeX, rangeY, scale, offsetX, offsetY, maxY);
+            }
             
             return;
         }
