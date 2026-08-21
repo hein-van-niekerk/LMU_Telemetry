@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using DuckDB.NET.Data;
 using LMU.Telemetry.Core.Models;
 
@@ -79,17 +80,22 @@ public static class DuckDBTelemetryWriter
         cmd.ExecuteNonQuery();
     }
 
+    // Interpolated {value:R} formats using the current culture, which uses a comma
+    // decimal separator on many locales - that silently corrupts the generated SQL
+    // (DuckDB then sees two values instead of one). Force invariant culture.
     private static void InsertDouble(DuckDBCommand cmd, string table, double ts, double value)
     {
-        cmd.CommandText = $"INSERT INTO \"{table}\" VALUES ({ts:R}, {value:R})";
+        cmd.CommandText = $"INSERT INTO \"{table}\" VALUES ({R(ts)}, {R(value)})";
         cmd.ExecuteNonQuery();
     }
 
     private static void InsertInt(DuckDBCommand cmd, string table, double ts, int value)
     {
-        cmd.CommandText = $"INSERT INTO \"{table}\" VALUES ({ts:R}, {value})";
+        cmd.CommandText = $"INSERT INTO \"{table}\" VALUES ({R(ts)}, {value})";
         cmd.ExecuteNonQuery();
     }
+
+    private static string R(double value) => value.ToString("R", CultureInfo.InvariantCulture);
 
     private static void Insert(DuckDBCommand cmd, string table, (string col, string val) a, (string col, string val) b)
     {
