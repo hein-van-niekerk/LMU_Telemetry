@@ -469,6 +469,8 @@ public class TrackPoint
     public Point Position { get; set; }      // X, Y coordinates in meters
     public double Heading { get; set; }      // Heading angle in radians
     public double Curvature { get; set; }    // Curvature (1/radius of turn)
+    public double? LeftWidth { get; set; }   // metres left of centreline (null if unknown)
+    public double? RightWidth { get; set; }  // metres right of centreline (null if unknown)
 }
 
 /// <summary>

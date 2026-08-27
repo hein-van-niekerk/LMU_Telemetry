@@ -1920,11 +1920,19 @@ public partial class MainWindow : Window
             {
                 System.Diagnostics.Debug.WriteLine($"No track map found for '{_currentTrackName}'");
                 Log($"No pre-generated track map found for '{_currentTrackName}'");
-                Log("Use 'Generate Track Map' button to create one");
-                
-                // Show Generate, hide Delete
-                GenerateTrackMapButton.Visibility = Visibility.Visible;
-                DeleteTrackMapButton.Visibility = Visibility.Collapsed;
+
+                // Auto-generate from OSM if telemetry file is available
+                if (!string.IsNullOrEmpty(_currentReplayFilePath))
+                {
+                    GenerateTrackMapButton.Visibility = Visibility.Collapsed;
+                    DeleteTrackMapButton.Visibility = Visibility.Collapsed;
+                    _ = TryAutoGenerateCorridorAsync(_currentReplayFilePath, _currentTrackName);
+                }
+                else
+                {
+                    GenerateTrackMapButton.Visibility = Visibility.Visible;
+                    DeleteTrackMapButton.Visibility = Visibility.Collapsed;
+                }
                 return false;
             }
         }
@@ -1932,13 +1940,144 @@ public partial class MainWindow : Window
         {
             Log($"ERROR loading track map: {ex.Message}");
             _generatedTrackMap = null;
-            
+
             // Show Generate, hide Delete
             GenerateTrackMapButton.Visibility = Visibility.Visible;
             DeleteTrackMapButton.Visibility = Visibility.Collapsed;
             return false;
         }
     }
+
+    /// <summary>
+    /// Automatically runs build_corridor.py to generate an OSM-anchored track map for this track.
+    /// Falls back to showing the manual Generate button if Python or the OSM reference isn't available.
+    /// </summary>
+    private async Task TryAutoGenerateCorridorAsync(string dbPath, string trackName)
+    {
+        Log($"Auto-generating OSM track map for '{trackName}'...");
+        StatusText.Text = "Generating track map...";
+        StatusText.Foreground = new SolidColorBrush(Colors.Yellow);
+
+        string? python = await Task.Run(FindPythonExecutable);
+        if (python == null)
+        {
+            Log("  Python not found on PATH — use 'Generate Track Map' button instead");
+            GenerateTrackMapButton.Visibility = Visibility.Visible;
+            StatusText.Text = $"Loaded: {System.IO.Path.GetFileName(dbPath)}";
+            StatusText.Foreground = new SolidColorBrush(Colors.LimeGreen);
+            return;
+        }
+
+        string? scriptPath = FindProjectScript("build_corridor.py");
+        if (scriptPath == null)
+        {
+            Log("  build_corridor.py not found — use 'Generate Track Map' button instead");
+            GenerateTrackMapButton.Visibility = Visibility.Visible;
+            StatusText.Text = $"Loaded: {System.IO.Path.GetFileName(dbPath)}";
+            StatusText.Foreground = new SolidColorBrush(Colors.LimeGreen);
+            return;
+        }
+
+        Log($"  Running build_corridor.py...");
+
+        var outputLines = new System.Collections.Concurrent.ConcurrentQueue<string>();
+
+        int exitCode = await Task.Run(() =>
+        {
+            var psi = new System.Diagnostics.ProcessStartInfo
+            {
+                FileName = python,
+                Arguments = $"\"{scriptPath}\" \"{dbPath}\"",
+                UseShellExecute = false,
+                CreateNoWindow = true,
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+            };
+            using var proc = new System.Diagnostics.Process { StartInfo = psi };
+            proc.OutputDataReceived += (_, e) => { if (e.Data != null) outputLines.Enqueue(e.Data); };
+            proc.ErrorDataReceived  += (_, e) => { if (e.Data != null) outputLines.Enqueue($"ERR: {e.Data}"); };
+            proc.Start();
+            proc.BeginOutputReadLine();
+            proc.BeginErrorReadLine();
+            proc.WaitForExit();
+            return proc.ExitCode;
+        });
+
+        // Log key output lines (step headers + results)
+        foreach (var line in outputLines)
+        {
+            var t = line.TrimStart();
+            if (t.StartsWith("[") || t.StartsWith("===") || t.StartsWith("ERR") ||
+                t.StartsWith("Arc offset") || t.StartsWith("Scale") ||
+                t.StartsWith("Loop length") || t.StartsWith("Mean dist") ||
+                t.StartsWith("Written") || t == "Done.")
+            {
+                Log($"  {t}");
+            }
+        }
+
+        if (exitCode == 0)
+        {
+            _generatedTrackMap = TrackMapStorage.Load(trackName);
+            if (_generatedTrackMap != null)
+            {
+                Log($"  Track map ready: {_generatedTrackMap.Points.Count} points, {_generatedTrackMap.TotalLength:F1} m");
+                GenerateTrackMapButton.Visibility = Visibility.Collapsed;
+                DeleteTrackMapButton.Visibility = Visibility.Visible;
+                StatusText.Text = $"Loaded: {System.IO.Path.GetFileName(dbPath)}";
+                StatusText.Foreground = new SolidColorBrush(Colors.LimeGreen);
+
+                if (_showTrackMap)
+                {
+                    ClearCanvas();
+                    _cachedTransformedFrames = null;
+                    _boundsCacheFrameCount = -1;
+                    DrawCenterline();
+                    UpdateDisplay();
+                }
+                return;
+            }
+        }
+
+        // Generation failed or no OSM for this track — fall back to manual button
+        Log($"  Auto-generation failed (exit {exitCode}) — no OSM reference for this track, or Python error.");
+        Log("  Use 'Generate Track Map' button to generate from raw laps instead.");
+        GenerateTrackMapButton.Visibility = Visibility.Visible;
+        StatusText.Text = $"Loaded: {System.IO.Path.GetFileName(dbPath)}";
+        StatusText.Foreground = new SolidColorBrush(Colors.LimeGreen);
+    }
+
+    private static string? FindPythonExecutable()
+    {
+        foreach (var exe in new[] { "python", "python3", "py" })
+        {
+            try
+            {
+                var psi = new System.Diagnostics.ProcessStartInfo(exe, "--version")
+                {
+                    UseShellExecute = false,
+                    CreateNoWindow = true,
+                    RedirectStandardOutput = true,
+                    RedirectStandardError = true,
+                };
+                using var p = System.Diagnostics.Process.Start(psi);
+                p?.WaitForExit(3000);
+                if (p?.ExitCode == 0) return exe;
+            }
+            catch { /* exe not on PATH */ }
+        }
+        return null;
+    }
+
+    private static string? FindProjectScript(string scriptName)
+    {
+        string appDir = AppDomain.CurrentDomain.BaseDirectory;
+        var projectRoot = System.IO.Directory.GetParent(appDir)?.Parent?.Parent?.Parent?.FullName;
+        if (projectRoot == null) return null;
+        var path = System.IO.Path.Combine(projectRoot, "scripts", scriptName);
+        return System.IO.File.Exists(path) ? path : null;
+    }
+
 
     /// <summary>
     /// Generate Track Map button click handler.

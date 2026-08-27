@@ -19,3 +19,10 @@ artifacts/
 # OS
 Thumbs.db
 .DS_Store
+
+# Generated file backups
+*.bak
+
+# Python
+__pycache__/
+*.pyc
