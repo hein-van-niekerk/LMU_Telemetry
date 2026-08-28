@@ -2003,17 +2003,22 @@ public partial class MainWindow : Window
             return proc.ExitCode;
         });
 
-        // Log key output lines (step headers + results)
+        // Log key output lines; surface all lines from NO OSM MAPPING section
+        bool inNoOsmSection = false;
         foreach (var line in outputLines)
         {
             var t = line.TrimStart();
-            if (t.StartsWith("[") || t.StartsWith("===") || t.StartsWith("ERR") ||
-                t.StartsWith("Arc offset") || t.StartsWith("Scale") ||
-                t.StartsWith("Loop length") || t.StartsWith("Mean dist") ||
-                t.StartsWith("Written") || t == "Done.")
-            {
+            if (t.StartsWith("NO OSM MAPPING") || t.StartsWith("===")) inNoOsmSection = true;
+            if (t.StartsWith("[1]") || t.StartsWith("[2]")) inNoOsmSection = false; // back into normal pipeline
+
+            bool isKeyLine = t.StartsWith("[") || t.StartsWith("ERR") ||
+                             t.StartsWith("Arc offset") || t.StartsWith("Scale") ||
+                             t.StartsWith("Loop length") || t.StartsWith("Mean dist") ||
+                             t.StartsWith("Written") || t == "Done." ||
+                             t.StartsWith("OSM file");
+
+            if (inNoOsmSection || isKeyLine)
                 Log($"  {t}");
-            }
         }
 
         if (exitCode == 0)
@@ -2039,9 +2044,10 @@ public partial class MainWindow : Window
             }
         }
 
-        // Generation failed or no OSM for this track — fall back to manual button
-        Log($"  Auto-generation failed (exit {exitCode}) — no OSM reference for this track, or Python error.");
-        Log("  Use 'Generate Track Map' button to generate from raw laps instead.");
+        // Generation failed — fall back to manual button
+        Log($"  Auto-generation failed (exit {exitCode}).");
+        Log("  If the track name mismatch is the cause, add it to Reference/name_corrections.json.");
+        Log("  Otherwise use 'Generate Track Map' to generate from raw laps.");
         GenerateTrackMapButton.Visibility = Visibility.Visible;
         StatusText.Text = $"Loaded: {System.IO.Path.GetFileName(dbPath)}";
         StatusText.Foreground = new SolidColorBrush(Colors.LimeGreen);

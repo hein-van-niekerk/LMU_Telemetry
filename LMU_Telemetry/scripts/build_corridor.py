@@ -333,15 +333,39 @@ def main(argv=None):
     # -- Determine OSM path --------------------------------------------------
     if args.osm:
         osm_path = Path(args.osm)
+        osm_match = "explicit"
     else:
-        # Look up in registry
         sys.path.insert(0, str(script_dir))
         from track_registry import find_osm_for_track
-        osm_file = find_osm_for_track(track_name)
+
+        # Quick LapDist read for length-based disambiguation
+        try:
+            _conn = duckdb.connect(str(args.ref_lap_db), read_only=True)
+            _ld_max = float(_conn.execute('SELECT MAX(value) FROM "Lap Dist"').fetchone()[0])
+            _conn.close()
+        except Exception:
+            _ld_max = None
+
+        osm_file, osm_match = find_osm_for_track(track_name, telem_length_m=_ld_max, ref_dir=ref_dir)
+
         if not osm_file:
-            print(f"ERROR: no OSM mapping found for '{track_name}'.", file=sys.stderr)
-            print("  -> Add an entry to scripts/track_registry.py or pass --osm explicitly.", file=sys.stderr)
+            # ── Actionable failure message ───────────────────────────────────
+            print()
+            print("=" * 64)
+            print("NO OSM MAPPING FOUND")
+            print("=" * 64)
+            print(f"  Game track name : \"{track_name}\"")
+            if _ld_max:
+                print(f"  Telem length    : {_ld_max:.0f} m")
+            print()
+            print("  Fix: add this track to Reference/name_corrections.json:")
+            print(f'    "{track_name}": "<osm_filename_stitched.json>"')
+            print()
+            print("  Available OSM files in Reference/:")
+            for f in sorted(ref_dir.glob("*_stitched.json")):
+                print(f"    {f.name}")
             return 1
+
         osm_path = ref_dir / osm_file
 
     if not osm_path.exists():
@@ -360,7 +384,7 @@ def main(argv=None):
     print("=" * 64)
     print(f"Track corridor builder: {track_name}")
     print("=" * 64)
-    print(f"OSM file   : {osm_path}")
+    print(f"OSM file   : {osm_path}  [{osm_match}]")
     print(f"Ref lap DB : {args.ref_lap_db}")
     if len(width_dbs) > 1 or width_dbs[0] != args.ref_lap_db:
         print(f"Width DBs  : {width_dbs}")

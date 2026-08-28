@@ -1,0 +1,10 @@
+{
+  "_instructions": [
+    "When the app logs 'No OSM mapping found for track: X', add an entry below.",
+    "Key   = the exact track name printed in the log (copy-paste it exactly).",
+    "Value = the OSM filename from the Reference/ folder.",
+    "Save this file — the app picks it up automatically on the next load."
+  ],
+  "corrections": {
+  }
+}
