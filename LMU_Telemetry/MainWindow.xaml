@@ -149,6 +149,14 @@
                         <!-- Hidden generate/delete kept for code-behind compatibility -->
                         <Button x:Name="GenerateTrackMapButton" Click="GenerateTrackMapButton_Click" Visibility="Collapsed"/>
                         <Button x:Name="DeleteTrackMapButton" Click="DeleteTrackMapButton_Click" Visibility="Collapsed"/>
+                        <!-- DEV MODE button: only visible when IsDevModeEnabled is true -->
+                        <Button x:Name="DevModeButton" Click="DevModeButton_Click"
+                                Content="⚙ DEV" Height="26" Padding="10,0" Margin="10,0,0,0"
+                                Background="#3A2000" Foreground="#FFA040"
+                                BorderBrush="#7A4000" BorderThickness="1"
+                                Cursor="Hand" ToolTip="Open Track Map Dev Mode"
+                                FontSize="10" FontWeight="Bold" FontFamily="Segoe UI"
+                                Visibility="Collapsed"/>
                     </StackPanel>
                 </Grid>
 
