@@ -141,9 +141,13 @@ public partial class MainWindow : Window
 
     private void MainWindow_Loaded(object sender, RoutedEventArgs e)
     {
-        // Show the DEV MODE button only when the setting is enabled
+        // Show the DEV MODE button when the setting is enabled, or always in Debug builds
+#if DEBUG
+        DevModeButton.Visibility = Visibility.Visible;
+#else
         if (LMU_Telemetry.Properties.Settings.Default.IsDevModeEnabled)
             DevModeButton.Visibility = Visibility.Visible;
+#endif
 
         UpdateControlsState();
         
