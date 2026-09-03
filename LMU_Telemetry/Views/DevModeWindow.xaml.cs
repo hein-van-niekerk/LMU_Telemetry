@@ -97,6 +97,75 @@ public partial class DevModeWindow : Window
         _vm.RefreshLapList();
     }
 
+    private void LoadRecordingButton_Click(object sender, RoutedEventArgs e)
+    {
+        var selectorWindow = new Window
+        {
+            Title = "Load Telemetry Recording",
+            Width = 600,
+            Height = 500,
+            WindowStartupLocation = WindowStartupLocation.CenterOwner,
+            Owner = this,
+            Background = new SolidColorBrush((Color)ColorConverter.ConvertFromString("#141414")),
+        };
+
+        var selector = new TelemetryFileSelector();
+        selector.FileSelected += (_, fileInfo) =>
+        {
+            selectorWindow.Close();
+            ImportLapsFromRecording(fileInfo);
+        };
+
+        selectorWindow.Content = selector;
+        selectorWindow.ShowDialog();
+    }
+
+    private void ImportLapsFromRecording(TelemetryFileInfo fileInfo)
+    {
+        try
+        {
+            StatusBar.Text = "Loading recording…";
+
+            var reader = new DuckDBTelemetryReader();
+            var frames = reader.LoadTelemetryData(fileInfo.FilePath);
+
+            if (frames.Count == 0)
+            {
+                MessageBox.Show("No telemetry data found in that file.", "Load Error",
+                    MessageBoxButton.OK, MessageBoxImage.Warning);
+                StatusBar.Text = "Ready.";
+                return;
+            }
+
+            string trackKey = fileInfo.TrackName;
+            if (string.IsNullOrWhiteSpace(trackKey) || trackKey == "Unknown Track")
+            {
+                trackKey = PromptTrackKey(_vm.CurrentTrackKey) ?? string.Empty;
+                if (string.IsNullOrEmpty(trackKey))
+                {
+                    StatusBar.Text = "Ready.";
+                    return;
+                }
+            }
+
+            var imported = _recorder.ImportLapsFromFrames(frames, trackKey);
+
+            // Refresh the list from disk for this track (also updates the header).
+            _vm.SetTrackKey(trackKey);
+            _vm.RefreshLapList();
+
+            MessageBox.Show(
+                $"Imported {imported.Count} lap(s) from \"{fileInfo.FileName}\" for track \"{trackKey}\".",
+                "Import Complete", MessageBoxButton.OK, MessageBoxImage.Information);
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show($"Failed to load recording:\n{ex.Message}", "Load Error",
+                MessageBoxButton.OK, MessageBoxImage.Error);
+            StatusBar.Text = "Ready.";
+        }
+    }
+
     private void DeleteLapButton_Click(object sender, RoutedEventArgs e)
     {
         if (_vm.SelectedLap == null) return;

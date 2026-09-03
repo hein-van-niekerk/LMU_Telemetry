@@ -103,6 +103,84 @@ public class DevLapRecorder
         });
     }
 
+    /// <summary>
+    /// Extract complete laps from a pre-loaded list of telemetry frames (e.g. loaded
+    /// from a .duckdb recording via DuckDBTelemetryReader) and save each one to disk,
+    /// exactly as if it had been captured live. Frames must already be in
+    /// chronological order. Returns the laps that were saved.
+    /// The trailing in-progress lap (never completed within the recording) is
+    /// discarded, matching live-recording behaviour.
+    /// Does not touch live-recording state, so it's safe to call while a live
+    /// recording session is separately in progress.
+    /// </summary>
+    public List<RawLapData> ImportLapsFromFrames(IReadOnlyList<Models.TelemetryFrame> frames, string trackKey)
+    {
+        var result = new List<RawLapData>();
+        if (string.IsNullOrEmpty(trackKey) || frames.Count == 0) return result;
+
+        var samples = new List<RawLapSample>();
+        int lastLap = -1;
+        int currentLapNumber = 0;
+        DateTime importedAt = DateTime.Now;
+
+        void Finalise(float lapTime)
+        {
+            if (samples.Count == 0) return;
+
+            var lap = new RawLapData
+            {
+                TrackKey    = trackKey,
+                LapNumber   = currentLapNumber,
+                RecordedAt  = importedAt,
+                LapTime     = lapTime > 0 ? lapTime : -1,
+                Samples     = new List<RawLapSample>(samples),
+            };
+            lap.Validate();
+
+            try
+            {
+                RawLapStorage.Save(lap);
+                result.Add(lap);
+                LapRecorded?.Invoke(this, lap);
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"[DevLapRecorder] Failed to save imported lap: {ex.Message}");
+            }
+        }
+
+        foreach (var frame in frames)
+        {
+            int lapNow = frame.CurrentLap;
+
+            if (lastLap >= 0 && lapNow > lastLap && lapNow == lastLap + 1)
+            {
+                Finalise(lapTime: frame.LastLapTime);
+                samples.Clear();
+                currentLapNumber = lapNow;
+            }
+            else if (lastLap == -1)
+            {
+                currentLapNumber = lapNow;
+            }
+
+            lastLap = lapNow;
+
+            samples.Add(new RawLapSample
+            {
+                X           = frame.PosX,
+                Y           = frame.PosY,
+                LapDistance = frame.LapDistance,
+                Time        = frame.Time,
+                Speed       = frame.Speed,
+            });
+        }
+
+        System.Diagnostics.Debug.WriteLine($"[DevLapRecorder] Imported {result.Count} lap(s) from {frames.Count} frames.");
+
+        return result;
+    }
+
     // -----------------------------------------------------------------------
     // Private helpers
     // -----------------------------------------------------------------------

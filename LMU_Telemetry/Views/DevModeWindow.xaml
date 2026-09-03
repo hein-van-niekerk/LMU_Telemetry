@@ -142,6 +142,11 @@
                                 Style="{StaticResource AccentBtn}"
                                 HorizontalAlignment="Stretch" Margin="0,0,0,8"
                                 Click="StartStopRecordButton_Click"/>
+                        <Button x:Name="LoadRecordingButton" Content="📂 Load Recording…"
+                                Style="{StaticResource DevBtn}"
+                                HorizontalAlignment="Stretch" Margin="0,0,0,4"
+                                ToolTip="Extract laps from an existing .duckdb telemetry recording"
+                                Click="LoadRecordingButton_Click"/>
                         <Button x:Name="RefreshLapsButton" Content="↺ Refresh"
                                 Style="{StaticResource DevBtn}"
                                 HorizontalAlignment="Stretch" Margin="0,0,0,4"
