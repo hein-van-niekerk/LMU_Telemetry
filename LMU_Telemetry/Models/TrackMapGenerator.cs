@@ -387,6 +387,174 @@ public class TrackMapGenerator
         return totalLength;
     }
 
+    // =========================================================================
+    // Corridor-envelope map generation from raw lap recordings
+    // =========================================================================
+
+    /// <summary>
+    /// Generate a track map from raw lap recordings using a corridor-envelope
+    /// algorithm.  Only laps with <c>IsKept == true</c> and no critical
+    /// validation issue are used.
+    /// </summary>
+    public static GeneratedTrackMap GenerateFromRawLaps(
+        List<RawLapData> keptLaps,
+        string trackKey,
+        int resampleTargetPoints = 600,
+        int smoothingWindow = 21)
+    {
+        var usable = keptLaps
+            .Where(l => l.IsKept && l.ValidationIssue != LapValidationIssue.TooFewSamples)
+            .ToList();
+
+        if (usable.Count == 0)
+            throw new InvalidOperationException("No kept laps available for generation.");
+
+        // --- Step 1: Convert each lap's samples to a Point list ---
+        var worldLaps = usable
+            .Select(l => l.Samples.Select(s => new Point(s.X, s.Y)).ToList())
+            .Where(pts => pts.Count >= 50)
+            .ToList();
+
+        if (worldLaps.Count == 0)
+            throw new InvalidOperationException("No laps with sufficient samples.");
+
+        // --- Step 2: Resample each lap to uniform arc-length spacing ---
+        var resampled = ResampleLapsAlongDistance(worldLaps, resampleTargetPoints);
+
+        // --- Step 3: Iterative centerline convergence ---
+        //   Start with the average of all laps, then project each lap's points
+        //   onto it and re-average twice for a tighter estimate.
+        var centerline = AverageAcrossLaps(resampled);
+
+        for (int iter = 0; iter < 2; iter++)
+        {
+            // Project each lap's points onto the current centerline to align them
+            var aligned = new List<List<Point>>();
+            foreach (var lap in resampled)
+            {
+                aligned.Add(ProjectLapOntoCenterline(lap, centerline));
+            }
+            centerline = AverageAcrossLaps(aligned);
+        }
+
+        // --- Step 4: Smooth ---
+        var smoothed = SmoothPath(centerline, smoothingWindow);
+
+        // --- Step 5: Compute heading / curvature and build TrackPoints ---
+        var trackPoints = CalculateHeadingAndCurvature(smoothed);
+
+        // --- Step 6: Estimate corridor width from per-sample lateral deviations ---
+        ComputeCorridorWidth(trackPoints, resampled);
+
+        var map = new GeneratedTrackMap
+        {
+            Points = trackPoints,
+            Corners = new List<Corner>(),
+            GeneratedFromLapCount = usable.Count,
+            TotalLength = CalculateTotalLength(trackPoints),
+            GeneratedDateTime = DateTime.Now,
+            TrackName = trackKey,
+            Source = TrackMapSource.Generated,
+            LayoutKey = trackKey,
+            RawLapManifest = usable
+                .Where(l => l.FileName != null)
+                .Select(l => l.FileName!)
+                .ToList(),
+        };
+
+        System.Diagnostics.Debug.WriteLine(
+            $"[GenerateFromRawLaps] trackKey={trackKey} laps={usable.Count} pts={trackPoints.Count} len={map.TotalLength:F0}m");
+
+        return map;
+    }
+
+    /// <summary>
+    /// For each point in <paramref name="lap"/>, find the nearest point on
+    /// <paramref name="centerline"/> and return the lap re-ordered by that
+    /// projection (so all laps are parameterised by the same arc-length).
+    /// </summary>
+    private static List<Point> ProjectLapOntoCenterline(
+        List<Point> lap,
+        List<Point> centerline)
+    {
+        if (centerline.Count == 0) return new List<Point>(lap);
+
+        // For each centerline index find the lap point closest to it
+        var result = new List<Point>(centerline.Count);
+        int lapCount = lap.Count;
+        int searchRadius = Math.Max(1, lapCount / centerline.Count * 3);
+
+        for (int ci = 0; ci < centerline.Count; ci++)
+        {
+            double fraction = (double)ci / (centerline.Count - 1);
+            int lapGuess = (int)(fraction * (lapCount - 1));
+
+            // Linear search within ±searchRadius of the guess
+            int bestIdx = lapGuess;
+            double bestDist = double.MaxValue;
+            int lo = Math.Max(0, lapGuess - searchRadius);
+            int hi = Math.Min(lapCount - 1, lapGuess + searchRadius);
+
+            for (int li = lo; li <= hi; li++)
+            {
+                double dx = lap[li].X - centerline[ci].X;
+                double dy = lap[li].Y - centerline[ci].Y;
+                double d2 = dx * dx + dy * dy;
+                if (d2 < bestDist) { bestDist = d2; bestIdx = li; }
+            }
+
+            result.Add(lap[bestIdx]);
+        }
+
+        return result;
+    }
+
+    /// <summary>
+    /// For each centerline TrackPoint compute the average lateral spread across
+    /// all laps and populate Width / LeftEdge / RightEdge.
+    /// </summary>
+    private static void ComputeCorridorWidth(
+        List<TrackPoint> centerline,
+        List<List<Point>> alignedLaps)
+    {
+        if (centerline.Count == 0 || alignedLaps.Count == 0) return;
+
+        for (int ci = 0; ci < centerline.Count; ci++)
+        {
+            var tp = centerline[ci];
+            // Normal vector (perpendicular to heading, pointing left)
+            double nx = -Math.Sin(tp.Heading);
+            double ny =  Math.Cos(tp.Heading);
+
+            double sumLeft = 0, sumRight = 0;
+            int count = 0;
+
+            foreach (var lap in alignedLaps)
+            {
+                if (ci >= lap.Count) continue;
+                double dx = lap[ci].X - tp.Position.X;
+                double dy = lap[ci].Y - tp.Position.Y;
+                // Signed projection onto normal (positive = left, negative = right)
+                double proj = dx * nx + dy * ny;
+                if (proj >= 0)
+                    sumLeft += proj;
+                else
+                    sumRight += -proj;
+                count++;
+            }
+
+            if (count > 0)
+            {
+                double left  = sumLeft  / count;
+                double right = sumRight / count;
+                // Add a generous margin (≈50 %) to estimate the actual track edge
+                tp.LeftEdge  = left  * 1.5;
+                tp.RightEdge = right * 1.5;
+                tp.Width     = tp.LeftEdge + tp.RightEdge;
+            }
+        }
+    }
+
     /// <summary>
     /// Detect corners from track points based on curvature peaks.
     /// </summary>
@@ -469,6 +637,18 @@ public class TrackPoint
     public Point Position { get; set; }      // X, Y coordinates in meters
     public double Heading { get; set; }      // Heading angle in radians
     public double Curvature { get; set; }    // Curvature (1/radius of turn)
+
+    // --- Width schema extension (additive; defaults to 0 = unknown) ---
+    // Old consumers that don't know these fields will simply ignore them.
+
+    /// <summary>Track width at this point in meters (0 = unknown).</summary>
+    public double Width { get; set; }
+
+    /// <summary>Left-edge position (normal direction, metres from centreline; 0 = unknown).</summary>
+    public double LeftEdge { get; set; }
+
+    /// <summary>Right-edge position (normal direction, metres from centreline; 0 = unknown).</summary>
+    public double RightEdge { get; set; }
 }
 
 /// <summary>
@@ -482,7 +662,21 @@ public class GeneratedTrackMap
     public double TotalLength { get; set; }
     public DateTime GeneratedDateTime { get; set; }
     public string TrackName { get; set; } = "Unknown";
-    
+
+    // --- Additive metadata fields (ignored by older consumers) ---
+
+    /// <summary>How this map was produced.</summary>
+    public TrackMapSource Source { get; set; } = TrackMapSource.Imported;
+
+    /// <summary>Track + layout key used during generation (empty for imported maps).</summary>
+    public string LayoutKey { get; set; } = string.Empty;
+
+    /// <summary>
+    /// File names of the raw-lap JSON files that contributed to this map.
+    /// Empty for imported maps.
+    /// </summary>
+    public List<string> RawLapManifest { get; set; } = new();
+
     /// <summary>
     /// Get just the positions for rendering.
     /// </summary>

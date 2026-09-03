@@ -152,6 +152,48 @@ public static class TrackMapStorage
     }
 
     /// <summary>
+    /// Return a lightweight summary for every map in the library without
+    /// loading the full point arrays.
+    /// </summary>
+    public static List<TrackMapLibraryEntry> GetLibraryEntries()
+    {
+        var entries = new List<TrackMapLibraryEntry>();
+
+        var options = new JsonSerializerOptions
+        {
+            Converters = { new PointJsonConverter() }
+        };
+
+        foreach (var file in Directory.GetFiles(StorageDirectory, "*.json"))
+        {
+            try
+            {
+                string json = File.ReadAllText(file);
+                var map = JsonSerializer.Deserialize<GeneratedTrackMap>(json, options);
+                if (map == null) continue;
+
+                entries.Add(new TrackMapLibraryEntry
+                {
+                    TrackKey            = Path.GetFileNameWithoutExtension(file),
+                    FilePath            = file,
+                    Source              = map.Source,
+                    PointCount          = map.Points?.Count ?? 0,
+                    TotalLength         = map.TotalLength,
+                    GeneratedFromLapCount = map.GeneratedFromLapCount,
+                    GeneratedDateTime   = map.GeneratedDateTime,
+                });
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"[TrackMapStorage] Skipping {file}: {ex.Message}");
+            }
+        }
+
+        entries.Sort((a, b) => string.Compare(a.TrackKey, b.TrackKey, StringComparison.OrdinalIgnoreCase));
+        return entries;
+    }
+
+    /// <summary>
     /// Get file path for a track map.
     /// </summary>
     private static string GetTrackMapPath(string trackName)

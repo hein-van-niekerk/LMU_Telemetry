@@ -86,6 +86,11 @@ public partial class MainWindow : Window
     private ContentControl? _sideTimingHost;
     private TelemetryDetailsWindow? _detailWindow;
 
+    // Dev Mode
+    private readonly DevLapRecorder _devLapRecorder = new();
+    private readonly DevModeViewModel _devModeViewModel = new();
+    private DevModeWindow? _devModeWindow;
+
     public MainWindow()
     {
         _trackRenderer = new TrackRenderer();
@@ -127,12 +132,22 @@ public partial class MainWindow : Window
         _replayTimer.Interval = TimeSpan.FromMilliseconds(16); // ~60Hz
         _replayTimer.Tick += ReplayTimer_Tick;
 
+        // Wire DevLapRecorder — laps bubble to the ViewModel
+        _devLapRecorder.LapRecorded += (_, lap) => _devModeViewModel.OnLapRecorded(lap);
+
         Loaded += MainWindow_Loaded;
         Closed += MainWindow_Closed;
     }
 
     private void MainWindow_Loaded(object sender, RoutedEventArgs e)
     {
+        // In Release builds, hide the DEV button unless the setting is enabled.
+        // In Debug builds (or when the setting is already on), leave it visible.
+#if !DEBUG
+        if (!LMU_Telemetry.Properties.Settings.Default.IsDevModeEnabled)
+            DevModeButton.Visibility = Visibility.Collapsed;
+#endif
+
         UpdateControlsState();
         
         // Clear cache when canvas size changes
@@ -380,6 +395,22 @@ public partial class MainWindow : Window
 
     private void OnNewFrame(object? sender, TelemetryFrame frame)
     {
+        // Feed the DevLapRecorder on the background thread (it's thread-safe)
+        string trackKey = frame.ExtendedData.TryGetValue("TrackName", out var tk)
+            ? tk?.ToString() ?? string.Empty
+            : string.Empty;
+        _devLapRecorder.FeedFrame(frame, trackKey);
+
+        // Propagate track-key change to the DevMode VM (cheap string compare inside)
+        if (!string.IsNullOrEmpty(trackKey) && trackKey != _devModeViewModel.CurrentTrackKey)
+        {
+            Dispatcher.BeginInvoke(() =>
+            {
+                _devModeViewModel.SetTrackKey(trackKey);
+                _devModeWindow?.NotifyTrackKeyChanged(trackKey, _generatedTrackMap);
+            });
+        }
+
         Dispatcher.BeginInvoke(() =>
         {
             if (_isUpdating) return;
@@ -2201,6 +2232,55 @@ public partial class MainWindow : Window
         }
     }
     
+    // -----------------------------------------------------------------------
+    // Dev Mode
+    // -----------------------------------------------------------------------
+
+    private void DevModeButton_Click(object sender, RoutedEventArgs e)
+    {
+        OpenDevModeWindow();
+    }
+
+    private void OpenDevModeWindow()
+    {
+        if (_devModeWindow == null || !_devModeWindow.IsLoaded)
+        {
+            _devModeWindow = new DevModeWindow(_devModeViewModel, _devLapRecorder)
+            {
+                Owner = this,
+            };
+            _devModeWindow.Closed += (_, _) => _devModeWindow = null;
+        }
+
+        // Pass current track key and existing map
+        if (!string.IsNullOrEmpty(_currentTrackName))
+            _devModeWindow.NotifyTrackKeyChanged(_currentTrackName, _generatedTrackMap);
+
+        _devModeWindow.Show();
+        _devModeWindow.Activate();
+    }
+
+    // Ctrl+Alt+D opens the Dev Mode window directly.
+    // Uses PreviewKeyDown (tunnelling) so child controls cannot swallow the event.
+    protected override void OnPreviewKeyDown(System.Windows.Input.KeyEventArgs e)
+    {
+        base.OnPreviewKeyDown(e);
+
+        if (e.Key == System.Windows.Input.Key.D
+            && Keyboard.Modifiers == (System.Windows.Input.ModifierKeys.Control | System.Windows.Input.ModifierKeys.Alt))
+        {
+            e.Handled = true;
+            try
+            {
+                OpenDevModeWindow();
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show(ex.ToString(), "Dev Mode Error", MessageBoxButton.OK, MessageBoxImage.Error);
+            }
+        }
+    }
+
     // DEPRECATED: Old automatic centerline building - replaced by manual track map generation
     private void BuildTrackCenterline(List<TelemetryFrame> frames)
     {

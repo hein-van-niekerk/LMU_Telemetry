@@ -20,6 +20,9 @@ namespace LMU_Telemetry.ViewModels
             PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(propertyName));
             return true;
         }
+
+        protected void OnPropertyChanged([CallerMemberName] string propertyName = "")
+            => PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(propertyName));
     }
 }
 
