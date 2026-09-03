@@ -2260,14 +2260,16 @@ public partial class MainWindow : Window
         _devModeWindow.Activate();
     }
 
-    // Ctrl+Alt+D opens the Dev Mode window directly
-    protected override void OnKeyDown(System.Windows.Input.KeyEventArgs e)
+    // Ctrl+Alt+D opens the Dev Mode window directly.
+    // Uses PreviewKeyDown (tunnelling) so child controls cannot swallow the event.
+    protected override void OnPreviewKeyDown(System.Windows.Input.KeyEventArgs e)
     {
-        base.OnKeyDown(e);
+        base.OnPreviewKeyDown(e);
 
         if (e.Key == System.Windows.Input.Key.D
             && Keyboard.Modifiers == (System.Windows.Input.ModifierKeys.Control | System.Windows.Input.ModifierKeys.Alt))
         {
+            e.Handled = true;
             OpenDevModeWindow();
         }
     }
