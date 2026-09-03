@@ -266,7 +266,7 @@ public partial class DevModeWindow : Window
     {
         if (_vm.SelectedLibraryEntry == null) return;
         var result = MessageBox.Show(
-            $"Delete map "{_vm.SelectedLibraryEntry.TrackKey}" from the library?\nThis cannot be undone.",
+            $"Delete map \"{_vm.SelectedLibraryEntry.TrackKey}\" from the library?\nThis cannot be undone.",
             "Delete Map", MessageBoxButton.YesNo, MessageBoxImage.Warning);
         if (result == MessageBoxResult.Yes)
             _vm.DeleteSelectedLibraryEntry();

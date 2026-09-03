@@ -146,7 +146,7 @@ public class DevModeViewModel : ObservableObject
     /// </summary>
     public void OnLapRecorded(RawLapData lap)
     {
-        Application.Current.Dispatcher.InvokeAsync(() =>
+        System.Windows.Application.Current.Dispatcher.InvokeAsync(() =>
         {
             Laps.Insert(0, new LapListItem(lap));
             StatusMessage = $"Lap {lap.LapNumber} recorded ({lap.SampleCount} pts). Issue: {lap.ValidationIssue}.";
@@ -163,7 +163,7 @@ public class DevModeViewModel : ObservableObject
         foreach (var lap in saved)
             Laps.Add(new LapListItem(lap));
 
-        StatusMessage = $"Loaded {Laps.Count} lap(s) for "{_currentTrackKey}".";
+        StatusMessage = $"Loaded {Laps.Count} lap(s) for \"{_currentTrackKey}\".";
     }
 
     /// <summary>Persist the IsKept flag for a single lap back to disk.</summary>
@@ -246,7 +246,7 @@ public class DevModeViewModel : ObservableObject
             TrackMapStorage.Save(_candidateMap, _currentTrackKey);
             CandidateMap = null;
             RefreshLibrary();
-            StatusMessage = $"Map saved for "{_currentTrackKey}".";
+            StatusMessage = $"Map saved for \"{_currentTrackKey}\".";
             return null;
         }
         catch (Exception ex)
@@ -322,7 +322,7 @@ public class DevModeViewModel : ObservableObject
 
             TrackMapStorage.Save(map, trackKey);
             RefreshLibrary();
-            StatusMessage = $"Imported "{trackKey}" from file.";
+            StatusMessage = $"Imported \"{trackKey}\" from file.";
             return null;
         }
         catch (Exception ex)
