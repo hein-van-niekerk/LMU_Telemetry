@@ -195,8 +195,20 @@
                         <Button x:Name="SaveCandidateButton" Content="💾 Save to Library"
                                 Style="{StaticResource DevBtn}"
                                 HorizontalAlignment="Stretch" Margin="0,0,0,6"
+                                ToolTip="Save as new map, or replace the existing one outright"
                                 IsEnabled="False"
                                 Click="SaveCandidateButton_Click"/>
+
+                        <Button x:Name="MergeCandidateButton" Content="🔗 Merge with Existing"
+                                Style="{StaticResource DevBtn}"
+                                HorizontalAlignment="Stretch" Margin="0,0,0,6"
+                                ToolTip="Align onto the existing map and attach new width/kerb data (keeps existing centerline by default)"
+                                IsEnabled="False" Visibility="Collapsed"
+                                Click="MergeCandidateButton_Click"/>
+
+                        <CheckBox x:Name="UseNewCenterlineCheckBox" Content="Use new centerline instead"
+                                  Foreground="#888888" FontSize="10" Margin="2,0,0,6"
+                                  Visibility="Collapsed"/>
 
                         <Button x:Name="DiscardCandidateButton" Content="✕ Discard"
                                 Style="{StaticResource DangerBtn}"
@@ -211,6 +223,10 @@
                         <TextBlock x:Name="CandidateInfoText" Text="—"
                                    Foreground="#888888" FontFamily="Consolas" FontSize="10"
                                    TextWrapping="Wrap"/>
+
+                        <TextBlock x:Name="AlignmentInfoText" Text="" Visibility="Collapsed"
+                                   Foreground="#FFA040" FontFamily="Consolas" FontSize="10"
+                                   TextWrapping="Wrap" Margin="0,10,0,0"/>
                     </StackPanel>
                 </Grid>
             </TabItem>

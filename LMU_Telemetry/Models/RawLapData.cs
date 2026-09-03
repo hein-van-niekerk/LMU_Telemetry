@@ -19,6 +19,7 @@ public enum LapValidationIssue
 {
     None = 0,
     TooFewSamples,           // fewer than 50 samples captured
+    OutLapOrPartial,         // doesn't start at/near the start/finish line (out-lap, or recording began mid-lap)
     PositionDiscontinuity,   // single-frame position jump above threshold
     ImplausibleSpeed,        // speed change > 300 km/h between consecutive frames
 }
@@ -56,6 +57,22 @@ public class RawLapData
         {
             ValidationIssue = LapValidationIssue.TooFewSamples;
             ValidationNote = $"Only {Samples.Count} samples (need ≥ 50)";
+            IsKept = false;
+            return;
+        }
+
+        // Out-lap / partial-lap heuristic: a genuine timed lap starts at the
+        // start/finish line, where the sim's LapDistance resets to ~0. If the
+        // first sample is well into the lap already, this is either an
+        // out-lap (car exited pits mid-lap and never crossed the line to
+        // begin a fresh timed lap) or the recording simply started mid-lap.
+        // Either way it would corrupt the distance-along-track binning used
+        // by the corridor-envelope algorithm, so exclude it by default.
+        const float startLineToleranceMeters = 50f;
+        if (Samples[0].LapDistance > startLineToleranceMeters)
+        {
+            ValidationIssue = LapValidationIssue.OutLapOrPartial;
+            ValidationNote = $"Starts {Samples[0].LapDistance:F0} m into the lap, not at the start/finish line (out-lap or partial recording)";
             IsKept = false;
             return;
         }

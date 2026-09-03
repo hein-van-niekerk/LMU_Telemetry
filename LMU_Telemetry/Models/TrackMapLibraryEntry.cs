@@ -9,6 +9,8 @@ public enum TrackMapSource
     Imported = 0,
     /// <summary>Generated from raw lap telemetry recorded inside the app.</summary>
     Generated = 1,
+    /// <summary>Existing map's centerline kept, aligned telemetry width/kerb data attached.</summary>
+    Merged = 2,
 }
 
 /// <summary>
@@ -39,8 +41,10 @@ public class TrackMapLibraryEntry
     public DateTime GeneratedDateTime { get; set; }
 
     /// <summary>Human-readable summary for display.</summary>
-    public string Summary =>
-        Source == TrackMapSource.Generated
-            ? $"{PointCount} pts · {TotalLength:F0} m · from {GeneratedFromLapCount} lap(s) · {GeneratedDateTime:yyyy-MM-dd HH:mm}"
-            : $"{PointCount} pts · {TotalLength:F0} m · imported · {GeneratedDateTime:yyyy-MM-dd HH:mm}";
+    public string Summary => Source switch
+    {
+        TrackMapSource.Generated => $"{PointCount} pts · {TotalLength:F0} m · from {GeneratedFromLapCount} lap(s) · {GeneratedDateTime:yyyy-MM-dd HH:mm}",
+        TrackMapSource.Merged    => $"{PointCount} pts · {TotalLength:F0} m · merged (existing centerline + {GeneratedFromLapCount} lap(s) width) · {GeneratedDateTime:yyyy-MM-dd HH:mm}",
+        _                        => $"{PointCount} pts · {TotalLength:F0} m · imported · {GeneratedDateTime:yyyy-MM-dd HH:mm}",
+    };
 }

@@ -146,6 +146,18 @@ namespace LMU_Telemetry.Telemetry
                 }
                 if (haveScoring)
                 {
+                    // Track+layout key resolution (see Track Map Dev Mode spec):
+                    // rF2Data.cs shows the shared-memory scoring/telemetry structs
+                    // expose exactly one identifier for the circuit — mTrackName —
+                    // no separate layout/venue ID field exists in this API. Per the
+                    // standard rF2/LMU shared-memory plugin convention, mTrackName
+                    // already differentiates layouts within the string itself (e.g.
+                    // distinct strings per configuration of the same venue), so this
+                    // raw value already serves as a de-facto {Track}_{Layout} key —
+                    // it's just not literally formatted that way. Dev Mode's raw-lap
+                    // storage, track-map storage and library all key off this same
+                    // string consistently, so different layouts of one track do not
+                    // collide as long as the sim reports distinct names for them.
                     frame.ExtendedData["TrackName"] = BytesToString(scoringInfo.mTrackName);
                     frame.ExtendedData["Session"] = scoringInfo.mSession;
                     frame.ExtendedData["AmbientTemp"] = scoringInfo.mAmbientTemp;

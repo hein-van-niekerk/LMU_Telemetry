@@ -204,11 +204,39 @@ public partial class DevModeWindow : Window
         DiscardCandidateButton.IsEnabled = true;
         CandidateInfoText.Text = _vm.StatusMessage;
 
+        // Merge is only offered once we know there's something to merge with.
+        // Refresh the reference overlay from disk too — MainWindow only pushes
+        // _existingMap when it has one loaded itself, which may be stale/null
+        // even though a map does exist on disk for this track key.
+        bool hasExisting = _vm.HasExistingMapForCurrentTrack;
+        if (hasExisting)
+            _existingMap = TrackMapStorage.Load(_vm.CurrentTrackKey);
+        MergeCandidateButton.Visibility     = hasExisting ? Visibility.Visible : Visibility.Collapsed;
+        MergeCandidateButton.IsEnabled      = hasExisting;
+        UseNewCenterlineCheckBox.Visibility = hasExisting ? Visibility.Visible : Visibility.Collapsed;
+        UseNewCenterlineCheckBox.IsChecked  = false;
+
+        UpdateAlignmentInfoText();
         RefreshPreviewCanvas();
+
+        // Non-blocking quality warning — candidate is already generated and usable either way.
+        if (_vm.LastGenerationWarning != null)
+            MessageBox.Show(_vm.LastGenerationWarning, "Candidate Quality", MessageBoxButton.OK, MessageBoxImage.Warning);
     }
 
     private void SaveCandidateButton_Click(object sender, RoutedEventArgs e)
     {
+        if (_vm.HasExistingMapForCurrentTrack)
+        {
+            var confirm = MessageBox.Show(
+                $"A map already exists for \"{_vm.CurrentTrackKey}\".\n\n" +
+                "This will REPLACE it outright with the new candidate (no alignment).\n" +
+                "Use \"Merge with Existing\" instead if you want to keep the verified centerline.\n\n" +
+                "Continue?",
+                "Replace Existing Map", MessageBoxButton.YesNo, MessageBoxImage.Warning);
+            if (confirm != MessageBoxResult.Yes) return;
+        }
+
         string? error = _vm.SaveCandidate();
         if (error != null)
         {
@@ -216,19 +244,65 @@ public partial class DevModeWindow : Window
             return;
         }
 
-        SaveCandidateButton.IsEnabled    = false;
-        DiscardCandidateButton.IsEnabled = false;
-        CandidateInfoText.Text = "Saved to library.";
-        RefreshPreviewCanvas();
+        ResetCandidateControls("Saved to library.");
+    }
+
+    private void MergeCandidateButton_Click(object sender, RoutedEventArgs e)
+    {
+        bool useNewCenterline = UseNewCenterlineCheckBox.IsChecked == true;
+        string? error = _vm.MergeCandidateWithExisting(useNewCenterline);
+        if (error != null)
+        {
+            MessageBox.Show(error, "Merge Error", MessageBoxButton.OK, MessageBoxImage.Warning);
+            return;
+        }
+
+        ResetCandidateControls(_vm.StatusMessage);
     }
 
     private void DiscardCandidateButton_Click(object sender, RoutedEventArgs e)
     {
         _vm.DiscardCandidate();
-        SaveCandidateButton.IsEnabled    = false;
-        DiscardCandidateButton.IsEnabled = false;
-        CandidateInfoText.Text = "—";
+        ResetCandidateControls("—");
+    }
+
+    private void ResetCandidateControls(string candidateInfoText)
+    {
+        SaveCandidateButton.IsEnabled       = false;
+        DiscardCandidateButton.IsEnabled    = false;
+        MergeCandidateButton.Visibility     = Visibility.Collapsed;
+        MergeCandidateButton.IsEnabled      = false;
+        UseNewCenterlineCheckBox.Visibility = Visibility.Collapsed;
+        CandidateInfoText.Text = candidateInfoText;
+        UpdateAlignmentInfoText();
         RefreshPreviewCanvas();
+    }
+
+    /// <summary>Show per-point divergence from the last auto-alignment against an existing map, if any.</summary>
+    private void UpdateAlignmentInfoText()
+    {
+        var alignment = _vm.LastAlignment;
+        if (alignment == null)
+        {
+            AlignmentInfoText.Visibility = Visibility.Collapsed;
+            AlignmentInfoText.Text = "";
+            return;
+        }
+
+        string text = $"Aligned to existing map:\n" +
+            $"  avg divergence {alignment.AverageDivergenceMeters:F2} m, max {alignment.MaxDivergenceMeters:F2} m";
+        if (alignment.HighDivergenceSegments.Count > 0)
+        {
+            text += $"\n  ⚠ {alignment.HighDivergenceSegments.Count} high-divergence stretch(es) — " +
+                    "possible stitching error or off-line laps:";
+            foreach (var seg in alignment.HighDivergenceSegments.Take(5))
+                text += $"\n    @ {seg.LapDistance:F0} m: {seg.DivergenceMeters:F1} m off";
+            if (alignment.HighDivergenceSegments.Count > 5)
+                text += $"\n    (+{alignment.HighDivergenceSegments.Count - 5} more)";
+        }
+
+        AlignmentInfoText.Text = text;
+        AlignmentInfoText.Visibility = Visibility.Visible;
     }
 
     private void PreviewCanvas_SizeChanged(object sender, SizeChangedEventArgs e)
@@ -252,9 +326,17 @@ public partial class DevModeWindow : Window
         if (_existingMap != null && _existingMap.Points.Count > 1)
             DrawPolyline(_existingMap.GetPositions(), "#444444", 1.5, w, h, null);
 
-        // Draw candidate in orange (new map)
+        // Draw candidate in orange (new map). Once an alignment has been
+        // computed against the existing map, show the ICP-aligned positions
+        // instead of the raw ones — that's what Merge will actually compare
+        // and attach, so the preview should reflect it.
         if (_vm.CandidateMap != null && _vm.CandidateMap.Points.Count > 1)
-            DrawPolyline(_vm.CandidateMap.GetPositions(), "#FFA040", 2.5, w, h, "#3A2000");
+        {
+            var positions = _vm.LastAlignment != null && _vm.LastAlignment.AlignedCandidate.Count > 1
+                ? _vm.LastAlignment.AlignedCandidate
+                : _vm.CandidateMap.GetPositions();
+            DrawPolyline(positions, "#FFA040", 2.5, w, h, "#3A2000");
+        }
     }
 
     private void DrawPolyline(

@@ -421,30 +421,77 @@ public class TrackMapGenerator
         // --- Step 2: Resample each lap to uniform arc-length spacing ---
         var resampled = ResampleLapsAlongDistance(worldLaps, resampleTargetPoints);
 
-        // --- Step 3: Iterative centerline convergence ---
-        //   Start with the average of all laps, then project each lap's points
-        //   onto it and re-average twice for a tighter estimate.
+        // --- Steps 3-5: Iterative corridor-envelope refinement ---
+        //   Reference centerline starts as the plain average of all laps.
+        //   Each iteration: project every lap onto the current centerline,
+        //   bin by arc-length index, and take min(d)/max(d) of the signed
+        //   lateral offset per bin — those are the track edges at that point
+        //   (this naturally captures kerb usage as long as at least one lap
+        //   rode the kerb there). The midpoint of [min, max] becomes the
+        //   corrected centerline offset for the next iteration.
         var centerline = AverageAcrossLaps(resampled);
+        double[] leftEdge = new double[centerline.Count];
+        double[] rightEdge = new double[centerline.Count];
 
-        for (int iter = 0; iter < 2; iter++)
+        for (int iter = 0; iter < 3; iter++)
         {
-            // Project each lap's points onto the current centerline to align them
-            var aligned = new List<List<Point>>();
-            foreach (var lap in resampled)
+            var aligned = resampled.Select(lap => ProjectLapOntoCenterline(lap, centerline)).ToList();
+            var headings = ComputeHeadings(centerline);
+            var refined = new List<Point>(centerline.Count);
+
+            for (int ci = 0; ci < centerline.Count; ci++)
             {
-                aligned.Add(ProjectLapOntoCenterline(lap, centerline));
+                double nx = -Math.Sin(headings[ci]);
+                double ny = Math.Cos(headings[ci]);
+
+                double minD = double.MaxValue, maxD = double.MinValue;
+                bool any = false;
+
+                foreach (var lap in aligned)
+                {
+                    if (ci >= lap.Count) continue;
+                    double dx = lap[ci].X - centerline[ci].X;
+                    double dy = lap[ci].Y - centerline[ci].Y;
+                    double d = dx * nx + dy * ny; // signed lateral offset (+left / -right)
+                    if (d < minD) minD = d;
+                    if (d > maxD) maxD = d;
+                    any = true;
+                }
+
+                if (!any)
+                {
+                    refined.Add(centerline[ci]);
+                    continue;
+                }
+
+                double mid = (minD + maxD) / 2.0;
+                leftEdge[ci]  = maxD;   // distance from centerline to left edge
+                rightEdge[ci] = -minD;  // distance from centerline to right edge (positive magnitude)
+
+                // Shift the centerline point laterally to the envelope midpoint
+                refined.Add(new Point(
+                    centerline[ci].X + mid * nx,
+                    centerline[ci].Y + mid * ny));
             }
-            centerline = AverageAcrossLaps(aligned);
+
+            centerline = refined;
         }
 
-        // --- Step 4: Smooth ---
+        // --- Smooth the converged centerline ---
+        // Smoothing only nudges neighbouring points together — it doesn't
+        // reorder or resample them — so the edge arrays computed above stay
+        // valid at the same indices.
         var smoothed = SmoothPath(centerline, smoothingWindow);
 
-        // --- Step 5: Compute heading / curvature and build TrackPoints ---
+        // --- Compute heading / curvature and build TrackPoints ---
         var trackPoints = CalculateHeadingAndCurvature(smoothed);
 
-        // --- Step 6: Estimate corridor width from per-sample lateral deviations ---
-        ComputeCorridorWidth(trackPoints, resampled);
+        for (int i = 0; i < trackPoints.Count && i < leftEdge.Length; i++)
+        {
+            trackPoints[i].LeftEdge  = leftEdge[i];
+            trackPoints[i].RightEdge = rightEdge[i];
+            trackPoints[i].Width     = leftEdge[i] + rightEdge[i];
+        }
 
         var map = new GeneratedTrackMap
         {
@@ -510,49 +557,37 @@ public class TrackMapGenerator
     }
 
     /// <summary>
-    /// For each centerline TrackPoint compute the average lateral spread across
-    /// all laps and populate Width / LeftEdge / RightEdge.
+    /// Compute a tangent heading (radians) at every point of a raw polyline
+    /// via central differences. Lightweight variant of
+    /// <see cref="CalculateHeadingAndCurvature"/> used mid-iteration, before
+    /// the final TrackPoint list (with curvature) is built.
     /// </summary>
-    private static void ComputeCorridorWidth(
-        List<TrackPoint> centerline,
-        List<List<Point>> alignedLaps)
+    private static double[] ComputeHeadings(List<Point> points)
     {
-        if (centerline.Count == 0 || alignedLaps.Count == 0) return;
+        var headings = new double[points.Count];
+        if (points.Count == 0) return headings;
 
-        for (int ci = 0; ci < centerline.Count; ci++)
+        for (int i = 0; i < points.Count; i++)
         {
-            var tp = centerline[ci];
-            // Normal vector (perpendicular to heading, pointing left)
-            double nx = -Math.Sin(tp.Heading);
-            double ny =  Math.Cos(tp.Heading);
-
-            double sumLeft = 0, sumRight = 0;
-            int count = 0;
-
-            foreach (var lap in alignedLaps)
+            if (points.Count < 2)
             {
-                if (ci >= lap.Count) continue;
-                double dx = lap[ci].X - tp.Position.X;
-                double dy = lap[ci].Y - tp.Position.Y;
-                // Signed projection onto normal (positive = left, negative = right)
-                double proj = dx * nx + dy * ny;
-                if (proj >= 0)
-                    sumLeft += proj;
-                else
-                    sumRight += -proj;
-                count++;
+                headings[i] = 0;
             }
-
-            if (count > 0)
+            else if (i == 0)
             {
-                double left  = sumLeft  / count;
-                double right = sumRight / count;
-                // Add a generous margin (≈50 %) to estimate the actual track edge
-                tp.LeftEdge  = left  * 1.5;
-                tp.RightEdge = right * 1.5;
-                tp.Width     = tp.LeftEdge + tp.RightEdge;
+                headings[i] = Math.Atan2(points[1].Y - points[0].Y, points[1].X - points[0].X);
+            }
+            else if (i == points.Count - 1)
+            {
+                headings[i] = Math.Atan2(points[i].Y - points[i - 1].Y, points[i].X - points[i - 1].X);
+            }
+            else
+            {
+                headings[i] = Math.Atan2(points[i + 1].Y - points[i - 1].Y, points[i + 1].X - points[i - 1].X);
             }
         }
+
+        return headings;
     }
 
     /// <summary>
