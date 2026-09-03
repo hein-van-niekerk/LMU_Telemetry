@@ -2260,7 +2260,7 @@ public partial class MainWindow : Window
         _devModeWindow.Activate();
     }
 
-    // Ctrl+Alt+D toggles dev mode enabled (and shows/hides the button)
+    // Ctrl+Alt+D opens the Dev Mode window directly
     protected override void OnKeyDown(System.Windows.Input.KeyEventArgs e)
     {
         base.OnKeyDown(e);
@@ -2268,16 +2268,7 @@ public partial class MainWindow : Window
         if (e.Key == System.Windows.Input.Key.D
             && Keyboard.Modifiers == (System.Windows.Input.ModifierKeys.Control | System.Windows.Input.ModifierKeys.Alt))
         {
-            var settings = LMU_Telemetry.Properties.Settings.Default;
-            settings.IsDevModeEnabled = !settings.IsDevModeEnabled;
-            settings.Save();
-
-            DevModeButton.Visibility = settings.IsDevModeEnabled
-                ? Visibility.Visible
-                : Visibility.Collapsed;
-
-            string msg = settings.IsDevModeEnabled ? "Dev Mode ENABLED" : "Dev Mode DISABLED";
-            MessageBox.Show(msg, "Dev Mode", MessageBoxButton.OK, MessageBoxImage.Information);
+            OpenDevModeWindow();
         }
     }
 
