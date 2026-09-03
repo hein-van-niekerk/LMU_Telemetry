@@ -2270,7 +2270,14 @@ public partial class MainWindow : Window
             && Keyboard.Modifiers == (System.Windows.Input.ModifierKeys.Control | System.Windows.Input.ModifierKeys.Alt))
         {
             e.Handled = true;
-            OpenDevModeWindow();
+            try
+            {
+                OpenDevModeWindow();
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show(ex.ToString(), "Dev Mode Error", MessageBoxButton.OK, MessageBoxImage.Error);
+            }
         }
     }
 
