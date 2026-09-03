@@ -9,6 +9,16 @@
     <UseWindowsForms>true</UseWindowsForms>
   </PropertyGroup>
 
+  <!-- UseWindowsForms implicitly pulls in global usings for System.Windows.Forms and
+       System.Drawing, which collide with WPF's System.Windows / System.Windows.Media
+       namespaces (CheckBox, MessageBox, Button, Color, Brush, etc.). WinForms is only
+       needed for FolderBrowserDialog, which is already accessed via an explicit alias
+       (WinForms = System.Windows.Forms), so drop the global usings project-wide. -->
+  <ItemGroup>
+    <Using Remove="System.Windows.Forms" />
+    <Using Remove="System.Drawing" />
+  </ItemGroup>
+
   <ItemGroup>
     <PackageReference Include="DuckDB.NET.Data" Version="1.1.3" />
     <PackageReference Include="DuckDB.NET.Bindings.Full" Version="1.1.3" />
