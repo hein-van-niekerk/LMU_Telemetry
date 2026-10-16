@@ -6,7 +6,8 @@ This is a passion project and a work in progress. See [Status and roadmap](#stat
 
 Built with C#, WPF (.NET 8), view models for the newer parts of the UI, and DuckDB for reading and writing telemetry files.
 
-![Analysis view showing a Spa-Francorchamps recording](docs/screenshot.png)
+<img width="1536" height="912" alt="image" src="https://github.com/user-attachments/assets/d6a20bcf-b51a-4ff2-b4c7-35d72fbae258" />
+
 
 ## Features
 
